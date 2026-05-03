@@ -30,6 +30,7 @@ npm run dist:beta
 ## 配置与数据位置
 
 - DeepSeek 与编排参数：`%AppData%\plantuml-studio-local\studio-agent-config.json`（含可选 `lastProjectRoot`、`projectIgnoreGlobs` 多行文本）
+- 错误日志归档（菜单「文件 → 查看错误日志」）：`%AppData%\plantuml-studio-local\studio-error-archive.jsonl`
 - 产出物暂存：`%AppData%\plantuml-studio-local\output-stash\`
 
 ## 冒烟与回归

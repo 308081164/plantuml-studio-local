@@ -1,5 +1,10 @@
 import { app, Menu, dialog, BrowserWindow, shell } from 'electron';
 
+function sendToRenderer(channel) {
+  const w = BrowserWindow.getFocusedWindow();
+  if (w && !w.isDestroyed()) w.webContents.send(channel);
+}
+
 /** 构建中文应用菜单（Windows / Linux）；macOS 会追加应用菜单 */
 export function buildZhMenu() {
   /** @type {Electron.MenuItemConstructorOptions[]} */
@@ -25,10 +30,20 @@ export function buildZhMenu() {
   template.push(
     {
       label: '文件',
-      submenu:
-        process.platform === 'darwin'
+      submenu: [
+        {
+          label: '查看本次执行日志',
+          click: () => sendToRenderer('studio:menu-session-log'),
+        },
+        {
+          label: '查看错误日志',
+          click: () => sendToRenderer('studio:menu-error-log'),
+        },
+        { type: 'separator' },
+        ...(process.platform === 'darwin'
           ? [{ role: 'close', label: '关闭窗口' }]
-          : [{ role: 'quit', label: '退出' }],
+          : [{ role: 'quit', label: '退出' }]),
+      ],
     },
     {
       label: '编辑',
@@ -96,7 +111,7 @@ export function buildZhMenu() {
               type: 'info',
               title: '关于',
               message: 'PlantUML 本地工作室',
-              detail: `版本 ${app.getVersion()}（M3 Beta：含项目目录摘要 + DeepSeek 一键制图）\n\n内置 PlantUML PicoWeb 与本机/捆绑 JRE 渲染；DeepSeek 仅在您主动使用智能功能时联网。\n\n任务栏：请右键桌面或开始菜单中的快捷方式，选择「固定到任务栏」。`,
+              detail: `版本 ${app.getVersion()}（M3 Beta：项目目录 + DeepSeek 制图）\n\n内置 PlantUML PicoWeb 与本机/捆绑 JRE 渲染；DeepSeek 仅在您主动使用智能功能时联网。\n\n执行日志与错误归档见菜单「文件」。\n\n任务栏：请右键桌面或开始菜单中的快捷方式，选择「固定到任务栏」。`,
             });
           },
         },

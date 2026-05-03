@@ -6,6 +6,16 @@ ipcRenderer.on('studio:menu-copy-preview', () => {
   if (menuCopyPreviewHandler) menuCopyPreviewHandler();
 });
 
+let menuSessionLogHandler = null;
+ipcRenderer.on('studio:menu-session-log', () => {
+  if (menuSessionLogHandler) menuSessionLogHandler();
+});
+
+let menuErrorLogHandler = null;
+ipcRenderer.on('studio:menu-error-log', () => {
+  if (menuErrorLogHandler) menuErrorLogHandler();
+});
+
 function base64ToArrayBuffer(b64) {
   const binary = atob(b64);
   const len = binary.length;
@@ -42,6 +52,20 @@ contextBridge.exposeInMainWorld('studio', {
       menuCopyPreviewHandler = null;
     };
   },
+  onMenuSessionLog: (cb) => {
+    menuSessionLogHandler = typeof cb === 'function' ? cb : null;
+    return () => {
+      menuSessionLogHandler = null;
+    };
+  },
+  onMenuErrorLog: (cb) => {
+    menuErrorLogHandler = typeof cb === 'function' ? cb : null;
+    return () => {
+      menuErrorLogHandler = null;
+    };
+  },
+  errorArchiveAppend: (payload) => ipcRenderer.invoke('studio:error-archive-append', payload),
+  errorArchiveRead: () => ipcRenderer.invoke('studio:error-archive-read'),
   stashList: () => ipcRenderer.invoke('studio:stash-list'),
   stashAdd: (payload) => ipcRenderer.invoke('studio:stash-add', payload),
   stashRemove: (ids) => ipcRenderer.invoke('studio:stash-remove', { ids }),

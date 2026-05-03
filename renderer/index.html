@@ -76,12 +76,14 @@
         <p id="agent-compact-msg" class="agent-compact-msg"></p>
         <div class="agent-compact-actions">
           <button type="button" id="btn-agent-collapse" class="hidden">收起</button>
-          <button type="button" id="btn-agent-expand-text" class="ghost">设置</button>
+          <button type="button" id="btn-agent-expand-text" class="ghost" title="展开 API；Shift+点击或双击打开「项目忽略」弹窗">
+            设置
+          </button>
           <button
             type="button"
             id="btn-agent-expand-gear"
             class="agent-gear-btn"
-            title="展开 API 与编排说明"
+            title="展开 API；Shift+点击或双击打开「项目忽略」弹窗"
             aria-label="设置"
           >
             <svg class="agent-gear-svg" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
@@ -136,23 +138,14 @@
             <span class="agent-project-badge" title="对应《UML大师-Agent-开发计划》第 11 节 · M3 Beta">2.0 Beta</span>
           </div>
           <p class="agent-project-hint">
-            选择本地工程根目录后，客户端在<strong>本机</strong>生成索引；一键生成时先经 DeepSeek「规划」选出少量关键文件，再读取正文与制图目标一并发送。默认尊重
-            <code>.gitignore</code>（简化匹配）并排除常见密钥路径；下列忽略规则与之叠加。若粗算总上下文超过约 100 万 tokens，将中止并提示缩小范围或新开会话（不自动压缩）。
+            选择本地工程根目录后，索引在一键生成时由<strong>本机</strong>构建；先经 DeepSeek「规划」选文件，再聚合正文与制图目标发送。默认尊重
+            <code>.gitignore</code>（简化匹配）并排除常见密钥路径。自定义 glob 见顶部紧凑栏「设置 / 齿轮」的
+            <strong>Shift+点击或双击</strong>弹窗。若粗算总上下文超过约 100 万 tokens 将中止（不自动压缩）。智能生成与 PlantUML 报错见菜单<strong>文件</strong>中的日志项。
           </p>
-          <label for="cfg-project-ignore-globs" class="agent-project-label">自定义忽略（每行一条 glob，保存设置后生效）</label>
-          <textarea
-            id="cfg-project-ignore-globs"
-            class="agent-project-ignore"
-            rows="2"
-            spellcheck="false"
-            placeholder="例如：**/dist/** 或 *.min.js"
-          ></textarea>
           <div class="agent-project-row">
             <input id="project-root-display" type="text" readonly placeholder="未选择项目目录…" title="当前项目根路径" />
             <button type="button" id="btn-project-pick">选择项目文件夹…</button>
-            <button type="button" id="btn-project-scan">刷新目录摘要</button>
           </div>
-          <pre id="project-summary-preview" class="project-summary-preview hidden" aria-label="目录摘要预览"></pre>
           <div class="agent-project-actions">
             <button type="button" id="btn-project-estimate" class="ghost" title="不调用 DeepSeek，仅按启发式选文件粗算首轮消息 tokens">
               估算上下文
@@ -162,9 +155,53 @@
             </button>
           </div>
         </div>
-        <pre id="agent-log" class="agent-log hidden"></pre>
       </section>
     </section>
+    <dialog id="agent-advanced-dialog" class="app-dialog">
+      <div class="app-dialog-head">
+        <h3 class="app-dialog-title">高级：项目目录扫描忽略</h3>
+        <button type="button" id="agent-advanced-close-x" class="app-dialog-close">关闭</button>
+      </div>
+      <p class="app-dialog-hint">
+        每行一条 glob，与 .gitignore 叠加。未点「保存并关闭」时，一键生成 / 估算仍使用当前输入框内容。
+      </p>
+      <label for="cfg-project-ignore-globs">自定义忽略</label>
+      <textarea
+        id="cfg-project-ignore-globs"
+        class="app-dialog-textarea"
+        rows="6"
+        spellcheck="false"
+        placeholder="**/dist/**&#10;*.min.js"
+      ></textarea>
+      <div class="app-dialog-actions">
+        <button type="button" id="btn-agent-advanced-save" class="primary">保存并关闭</button>
+        <button type="button" id="agent-advanced-close-btn" class="ghost">取消</button>
+      </div>
+    </dialog>
+    <dialog id="session-log-dialog" class="app-dialog app-dialog--wide">
+      <div class="app-dialog-head">
+        <h3 class="app-dialog-title">本次执行日志</h3>
+        <button type="button" id="session-log-dialog-close" class="app-dialog-close">关闭</button>
+      </div>
+      <pre id="session-log-dialog-body" class="app-dialog-body"></pre>
+    </dialog>
+    <dialog id="error-log-dialog" class="app-dialog app-dialog--wide">
+      <div class="app-dialog-head">
+        <h3 class="app-dialog-title">错误日志（自动归档）</h3>
+        <button type="button" id="error-log-dialog-close" class="app-dialog-close">关闭</button>
+      </div>
+      <pre id="error-log-dialog-body" class="app-dialog-body"></pre>
+    </dialog>
+    <dialog id="project-imported-dialog" class="app-dialog">
+      <div class="app-dialog-head">
+        <h3 class="app-dialog-title">已选择项目目录</h3>
+        <button type="button" id="project-imported-close-x" class="app-dialog-close">关闭</button>
+      </div>
+      <pre id="project-imported-msg" class="app-dialog-hint-block"></pre>
+      <div class="app-dialog-actions">
+        <button type="button" id="project-imported-ok" class="primary">确定</button>
+      </div>
+    </dialog>
     <footer class="foot">
       <small>渲染由本机 Java + PlantUML PicoWeb 完成；DeepSeek 仅在您使用「智能生成」时经 HTTPS 访问您配置的 Base URL。</small>
     </footer>

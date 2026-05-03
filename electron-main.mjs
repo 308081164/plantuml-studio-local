@@ -1,6 +1,15 @@
 import { app, BrowserWindow, ipcMain, dialog, clipboard, nativeImage } from 'electron';
 import { spawn } from 'node:child_process';
-import { existsSync, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'node:fs';
+import {
+  existsSync,
+  readdirSync,
+  statSync,
+  readFileSync,
+  writeFileSync,
+  appendFileSync,
+  mkdirSync,
+  unlinkSync,
+} from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { dirname, join } from 'node:path';
@@ -646,6 +655,52 @@ function pruneStashManifest() {
   return items;
 }
 
+/* ---------- 错误日志归档（用户目录 JSONL，供「文件 → 查看错误日志」） ---------- */
+
+const ERROR_LOG_MAX_FILE_BYTES = 1_200_000;
+
+function studioErrorArchivePath() {
+  return join(app.getPath('userData'), 'studio-error-archive.jsonl');
+}
+
+function appendStudioErrorArchive(record) {
+  const line =
+    JSON.stringify({
+      ts: new Date().toISOString(),
+      kind: String(record.kind || 'error').slice(0, 64),
+      message: String(record.message || '').slice(0, 12000),
+      detail: String(record.detail || '').slice(0, 24000),
+    }) + '\n';
+  try {
+    appendFileSync(studioErrorArchivePath(), line, 'utf8');
+    pruneStudioErrorArchiveIfHuge();
+  } catch {
+    /* ignore */
+  }
+}
+
+function pruneStudioErrorArchiveIfHuge() {
+  const p = studioErrorArchivePath();
+  try {
+    if (!existsSync(p)) return;
+    const st = statSync(p);
+    if (st.size <= ERROR_LOG_MAX_FILE_BYTES) return;
+    const raw = readFileSync(p, 'utf8');
+    const cut = raw.slice(-Math.floor(ERROR_LOG_MAX_FILE_BYTES * 0.85));
+    writeFileSync(p, `…（文件过长已截断较早记录 @ ${new Date().toISOString()}）\n${cut}`, 'utf8');
+  } catch {
+    /* ignore */
+  }
+}
+
+function readStudioErrorArchiveTail() {
+  const p = studioErrorArchivePath();
+  if (!existsSync(p)) return '（尚无错误归档）';
+  const raw = readFileSync(p, 'utf8');
+  const max = 160_000;
+  return raw.length > max ? `…（仅显示最近约 ${max} 字符）\n${raw.slice(-max)}` : raw;
+}
+
 function buildStashListPayload() {
   const items = pruneStashManifest();
   const enriched = items.map((meta) => {
@@ -703,6 +758,27 @@ function registerIpcHandlers() {
   ipcMain.handle('studio:agent-config-get', () => loadAgentConfig());
 
   ipcMain.handle('studio:agent-config-set', (_e, partial) => saveAgentConfig(partial || {}));
+
+  ipcMain.handle('studio:error-archive-append', (_e, payload) => {
+    try {
+      appendStudioErrorArchive({
+        kind: payload?.kind,
+        message: payload?.message,
+        detail: payload?.detail,
+      });
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String(e.message || e) };
+    }
+  });
+
+  ipcMain.handle('studio:error-archive-read', () => {
+    try {
+      return { ok: true, text: readStudioErrorArchiveTail() };
+    } catch (e) {
+      return { ok: false, text: '', error: String(e.message || e) };
+    }
+  });
 
   ipcMain.handle('studio:agent-run', async (_e, { userText }) => {
     try {

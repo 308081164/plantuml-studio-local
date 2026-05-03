@@ -1,6 +1,6 @@
 {
   "name": "plantuml-studio-local",
-  "version": "2.0.0-beta.2",
+  "version": "2.0.0-beta.3",
   "description": "本地 PlantUML 编辑预览（PicoWeb + Electron，M3 Beta：项目目录驱动制图）",
   "main": "electron-main.mjs",
   "type": "module",

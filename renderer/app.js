@@ -10,9 +10,26 @@ const $ = (id) => document.getElementById(id);
 /** 当前选择的项目根目录（与主进程配置 lastProjectRoot 同步） */
 let selectedProjectRoot = '';
 
+/** 最近一轮智能生成 / 项目制图的进程日志（供「文件 → 查看本次执行日志」） */
+let lastSessionExecutionLog = '';
+
 function projectIgnoreGlobsValue() {
   const el = $('cfg-project-ignore-globs');
   return el ? el.value : '';
+}
+
+function reportErrorArchive(kind, message, detail = '') {
+  if (!window.studio?.errorArchiveAppend) return;
+  void window.studio.errorArchiveAppend({
+    kind: String(kind || 'error').slice(0, 64),
+    message: String(message || '').slice(0, 4000),
+    detail: String(detail || '').slice(0, 12000),
+  });
+}
+
+function recordSessionExecutionLog(body) {
+  const ts = new Date().toLocaleString('zh-CN', { hour12: false });
+  lastSessionExecutionLog = `── 最近一轮 · ${ts} ──\n${String(body || '').trim() || '（无日志）'}`;
 }
 
 function setStatus(text, ok) {
@@ -23,21 +40,23 @@ function setStatus(text, ok) {
   else if (ok === false) el.classList.add('status--error');
 }
 
-function showErrors(lines) {
+/**
+ * @param {string[]} lines
+ * @param {string | null} archiveKind 为 null 时不写入错误归档（仅界面提示）
+ */
+function showErrors(lines, archiveKind = 'preview-plantuml') {
   const box = $('errors');
   if (!lines.length) {
     box.classList.add('hidden');
     box.textContent = '';
     return;
   }
-  box.textContent = lines.join('\n');
+  const joined = lines.join('\n');
+  box.textContent = joined;
   box.classList.remove('hidden');
-}
-
-function setAgentLog(text, visible) {
-  const el = $('agent-log');
-  el.textContent = text || '';
-  el.classList.toggle('hidden', !visible);
+  if (archiveKind) {
+    reportErrorArchive(archiveKind, lines[0] || '错误', joined);
+  }
 }
 
 function clearPreview() {
@@ -83,7 +102,8 @@ async function render() {
 
     if (!res.ok) {
       const t = await res.text();
-      showErrors([`HTTP ${res.status}`, t.slice(0, 2000)]);
+      const errBlock = [`HTTP ${res.status}`, t.slice(0, 2000)];
+      showErrors(errBlock, 'render-http');
       setStatus('请求失败', false);
       return;
     }
@@ -111,7 +131,8 @@ async function render() {
     showErrors(errLines);
     setStatus(errLines.length ? '已渲染（含 PlantUML 报错信息）' : '已渲染', !errLines.length);
   } catch (e) {
-    showErrors([String(e.message || e)]);
+    const msg = String(e.message || e);
+    showErrors([msg], 'render-exception');
     setStatus('异常', false);
   }
 }
@@ -409,14 +430,14 @@ function refreshAgentCompactBarUi() {
   const collapsed = orch?.classList.contains('agent-orchestration-block--collapsed');
   if (collapsed) {
     msg.textContent =
-      'DeepSeek 已配置。下方「自然语言需求」始终可用；点击「设置」、齿轮或顶部「API 与智能生成」可展开 API 与编排说明区域。';
+      'DeepSeek 已配置。下方「自然语言需求」始终可用；点击「设置」、齿轮或顶部「API 与智能生成」可展开 API；Shift+点击或双击设置/齿轮可打开「项目忽略」弹窗。执行日志见菜单「文件」。';
     bCollapse.classList.add('hidden');
     bSet.classList.remove('hidden');
     bGear.classList.remove('hidden');
     bGear.title = '展开 API 与编排说明';
   } else {
     msg.textContent =
-      'API 与编排说明已展开。完成后点击「收起」或再次点击顶部「API 与智能生成」收起该区域（自然语言输入区仍保留）。';
+      'API 与编排说明已展开。完成后点击「收起」或再次点击顶部「API 与智能生成」收起。Shift+点击或双击设置/齿轮打开「项目忽略」。日志见菜单「文件」。';
     bCollapse.classList.remove('hidden');
     bSet.classList.add('hidden');
     bGear.classList.add('hidden');
@@ -480,21 +501,6 @@ async function loadAgentForm() {
     selectedProjectRoot = String(c.lastProjectRoot || '').trim();
     const pr = $('project-root-display');
     if (pr) pr.value = selectedProjectRoot;
-    const prev = $('project-summary-preview');
-    if (selectedProjectRoot && window.studio?.projectSummary && prev) {
-      window.studio
-        .projectSummary(selectedProjectRoot)
-        .then((r) => {
-          if (r?.ok && prev) {
-            prev.textContent = r.summary;
-            prev.classList.remove('hidden');
-          }
-        })
-        .catch(() => {});
-    } else if (prev) {
-      prev.textContent = '';
-      prev.classList.add('hidden');
-    }
     applyInitialAgentLayoutFromConfig();
   } catch {
     /* ignore */
@@ -541,14 +547,18 @@ async function saveAgentForm() {
 
 async function applyAgentRunResult(r) {
   const logText = (r.logs || []).join('\n');
-  if (logText) setAgentLog(logText, true);
+  recordSessionExecutionLog([logText, r.error && !r.ok ? `错误: ${r.error}` : ''].filter(Boolean).join('\n'));
   if (r.source) $('source').value = r.source;
   if (r.ok) {
     setStatus('智能生成成功，正在刷新预览…', true);
     await render();
   } else {
     setStatus(r.error || '智能生成未通过校验', false);
-    showErrors([r.error || '未通过 PlantUML 校验', '已将最后一次模型输出填入编辑器，可手动修改后再渲染。']);
+    showErrors(
+      [r.error || '未通过 PlantUML 校验', '已将最后一次模型输出填入编辑器，可手动修改后再渲染。'],
+      null
+    );
+    reportErrorArchive('agent-run', r.error || '智能生成未通过 PlantUML 校验', logText);
     await render();
   }
 }
@@ -560,41 +570,31 @@ async function runAgent() {
     setStatus('请填写自然语言需求', false);
     return;
   }
-  setAgentLog('', false);
   setStatus('DeepSeek 编排运行中…', null);
   try {
     const r = await window.studio.runAgent(userText);
     await applyAgentRunResult(r);
   } catch (e) {
-    setStatus(String(e.message || e), false);
+    const msg = String(e.message || e);
+    setStatus(msg, false);
+    reportErrorArchive('agent-exception', msg);
   }
 }
 
-async function refreshProjectSummary() {
-  if (!window.studio?.projectSummary) return;
-  if (!selectedProjectRoot) {
-    setStatus('请先选择项目目录', false);
-    return;
-  }
-  setStatus('正在生成本地目录摘要…', null);
-  try {
-    const r = await window.studio.projectSummary(selectedProjectRoot);
-    const prev = $('project-summary-preview');
-    if (!r?.ok) {
-      setStatus(r?.error || '摘要失败', false);
-      return;
-    }
-    if (prev) {
-      prev.textContent = r.summary;
-      prev.classList.remove('hidden');
-    }
-    setStatus(
-      `目录摘要已更新（约 ${r.stats?.entries ?? '?'} 条路径，${r.stats?.snippetCount ?? '?'} 段节选）`,
-      true
-    );
-  } catch (e) {
-    setStatus(String(e.message || e), false);
-  }
+function openProjectImportedDialog(absolutePath) {
+  const dlg = $('project-imported-dialog');
+  $('project-imported-msg').textContent = `已选择项目目录：\n\n${absolutePath}\n\n索引将在「估算上下文」或「一键生成」时在后台构建；主界面不再展示目录摘要。`;
+  dlg.showModal();
+}
+
+function openAgentAdvancedDialog() {
+  const dlg = $('agent-advanced-dialog');
+  if (!dlg) return;
+  dlg.showModal();
+}
+
+function closeAgentAdvancedDialog() {
+  $('agent-advanced-dialog')?.close();
 }
 
 async function pickProjectDirectory() {
@@ -608,7 +608,7 @@ async function pickProjectDirectory() {
   if (window.studio.setAgentConfig) {
     await window.studio.setAgentConfig({ lastProjectRoot: r.path });
   }
-  await refreshProjectSummary();
+  openProjectImportedDialog(r.path);
 }
 
 async function estimateProjectContext() {
@@ -626,6 +626,7 @@ async function estimateProjectContext() {
     });
     if (!r?.ok) {
       setStatus(r?.error || '估算失败', false);
+      reportErrorArchive('estimate-context', r?.error || '估算失败', JSON.stringify(r, null, 2).slice(0, 4000));
       return;
     }
     const warn = r.exceedsProductLimit
@@ -636,7 +637,9 @@ async function estimateProjectContext() {
       !r.exceedsProductLimit
     );
   } catch (e) {
-    setStatus(String(e.message || e), false);
+    const msg = String(e.message || e);
+    setStatus(msg, false);
+    reportErrorArchive('estimate-exception', msg);
   }
 }
 
@@ -651,7 +654,6 @@ async function runAgentProjectOneClick() {
     setStatus('请先选择项目目录', false);
     return;
   }
-  setAgentLog('', false);
   setStatus('DeepSeek 规划选文件 + 制图运行中…', null);
   try {
     const r = await window.studio.runAgentProject({
@@ -661,8 +663,80 @@ async function runAgentProjectOneClick() {
     });
     await applyAgentRunResult(r);
   } catch (e) {
-    setStatus(String(e.message || e), false);
+    const msg = String(e.message || e);
+    setStatus(msg, false);
+    reportErrorArchive('agent-project-exception', msg);
   }
+}
+
+function openSessionLogDialog() {
+  const dlg = $('session-log-dialog');
+  const body = $('session-log-dialog-body');
+  body.textContent = lastSessionExecutionLog.trim() || '（尚未运行过「智能生成」或「项目一键制图」，或本轮无日志输出）';
+  dlg.showModal();
+}
+
+async function openErrorLogDialog() {
+  const dlg = $('error-log-dialog');
+  const body = $('error-log-dialog-body');
+  body.textContent = '加载中…';
+  dlg.showModal();
+  if (!window.studio?.errorArchiveRead) {
+    body.textContent = '预加载脚本未暴露 errorArchiveRead';
+    return;
+  }
+  try {
+    const r = await window.studio.errorArchiveRead();
+    body.textContent = r?.ok ? r.text : r?.error || '读取失败';
+  } catch (e) {
+    body.textContent = String(e.message || e);
+  }
+}
+
+function wireAppDialogs() {
+  const closeByBackdrop = (id) => {
+    const d = $(id);
+    if (!d) return;
+    d.addEventListener('click', (ev) => {
+      if (ev.target === d) d.close();
+    });
+  };
+  closeByBackdrop('agent-advanced-dialog');
+  closeByBackdrop('session-log-dialog');
+  closeByBackdrop('error-log-dialog');
+  closeByBackdrop('project-imported-dialog');
+
+  $('agent-advanced-close-x')?.addEventListener('click', () => closeAgentAdvancedDialog());
+  $('agent-advanced-close-btn')?.addEventListener('click', () => closeAgentAdvancedDialog());
+  $('btn-agent-advanced-save')?.addEventListener('click', async () => {
+    if (window.studio?.setAgentConfig) {
+      await window.studio.setAgentConfig({ projectIgnoreGlobs: projectIgnoreGlobsValue() });
+      setStatus('已保存项目忽略规则', true);
+    }
+    closeAgentAdvancedDialog();
+  });
+
+  $('session-log-dialog-close')?.addEventListener('click', () => $('session-log-dialog')?.close());
+  $('error-log-dialog-close')?.addEventListener('click', () => $('error-log-dialog')?.close());
+  $('project-imported-ok')?.addEventListener('click', () => $('project-imported-dialog')?.close());
+  $('project-imported-close-x')?.addEventListener('click', () => $('project-imported-dialog')?.close());
+}
+
+function wireAgentExpandAdvanced(elId) {
+  const el = $(elId);
+  if (!el) return;
+  el.addEventListener('click', (e) => {
+    if (e.shiftKey) {
+      e.preventDefault();
+      openAgentAdvancedDialog();
+      return;
+    }
+    setAgentMainCollapsed(false);
+  });
+  el.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    openAgentAdvancedDialog();
+  });
 }
 
 function init() {
@@ -673,15 +747,14 @@ function init() {
 
   $('btn-agent-settings').addEventListener('click', () => toggleAgentMainFromToolbar());
 
-  $('btn-agent-expand-text').addEventListener('click', () => setAgentMainCollapsed(false));
-  $('btn-agent-expand-gear').addEventListener('click', () => setAgentMainCollapsed(false));
+  wireAgentExpandAdvanced('btn-agent-expand-text');
+  wireAgentExpandAdvanced('btn-agent-expand-gear');
   $('btn-agent-collapse').addEventListener('click', () => setAgentMainCollapsed(true));
 
   $('btn-save-agent-cfg').addEventListener('click', () => saveAgentForm());
   $('btn-agent-run').addEventListener('click', () => runAgent());
 
   $('btn-project-pick')?.addEventListener('click', () => pickProjectDirectory());
-  $('btn-project-scan')?.addEventListener('click', () => refreshProjectSummary());
   $('btn-project-estimate')?.addEventListener('click', () => estimateProjectContext());
   $('btn-project-generate')?.addEventListener('click', () => runAgentProjectOneClick());
 
@@ -728,7 +801,14 @@ function init() {
       copyPreviewPngToClipboard();
     });
   }
+  if (window.studio?.onMenuSessionLog) {
+    window.studio.onMenuSessionLog(() => openSessionLogDialog());
+  }
+  if (window.studio?.onMenuErrorLog) {
+    window.studio.onMenuErrorLog(() => void openErrorLogDialog());
+  }
 
+  wireAppDialogs();
   loadAgentForm();
   refreshStashList().catch(() => {});
 

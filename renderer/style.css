@@ -630,28 +630,6 @@ button:hover {
   color: var(--muted);
 }
 
-.agent-project-label {
-  display: block;
-  font-size: 0.72rem;
-  font-weight: 500;
-  color: var(--text);
-  margin-bottom: 0.25rem;
-}
-
-.agent-project-ignore {
-  width: 100%;
-  box-sizing: border-box;
-  margin: 0 0 0.5rem;
-  padding: 0.4rem 0.5rem;
-  font-size: 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--editor-bg);
-  color: var(--text);
-  resize: vertical;
-  min-height: 2.5rem;
-}
-
 .agent-project-row {
   display: flex;
   flex-wrap: wrap;
@@ -679,29 +657,108 @@ button:hover {
   align-items: center;
 }
 
-.project-summary-preview {
-  margin: 0;
-  padding: 0.45rem 0.55rem;
-  max-height: 140px;
-  overflow: auto;
-  font-size: 0.68rem;
-  line-height: 1.35;
-  white-space: pre-wrap;
-  background: var(--bg);
+/* 通用弹窗（忽略规则 / 执行日志 / 错误归档 / 项目已选） */
+.app-dialog {
+  max-width: min(640px, 92vw);
+  width: 100%;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 10px;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app-dialog--wide {
+  max-width: min(920px, 96vw);
+}
+
+.app-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.48);
+}
+
+.app-dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.app-dialog-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.app-dialog-close {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0.2rem 0.4rem;
+}
+
+.app-dialog-close:hover {
+  color: var(--text);
+}
+
+.app-dialog-hint {
+  margin: 0.65rem 0.85rem 0;
+  font-size: 0.76rem;
+  line-height: 1.45;
   color: var(--muted);
 }
 
-.agent-log {
-  margin: 0.5rem 0 0;
-  padding: 0.5rem 0.65rem;
-  background: var(--bg);
+.app-dialog-hint-block {
+  margin: 0.5rem 0.85rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  font-family: inherit;
+  color: var(--text);
+}
+
+.app-dialog label {
+  display: block;
+  margin: 0.5rem 0.85rem 0;
+  font-size: 0.76rem;
+  font-weight: 500;
+}
+
+.app-dialog-textarea {
+  display: block;
+  width: calc(100% - 1.7rem);
+  margin: 0.35rem 0.85rem 0.65rem;
+  box-sizing: border-box;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.78rem;
   border: 1px solid var(--border);
   border-radius: 6px;
-  font-size: 0.75rem;
-  max-height: 120px;
+  background: var(--editor-bg);
+  color: var(--text);
+  resize: vertical;
+}
+
+.app-dialog-body {
+  margin: 0;
+  padding: 0.65rem 0.85rem;
+  max-height: min(70vh, 560px);
   overflow: auto;
+  font-size: 0.74rem;
+  line-height: 1.4;
   white-space: pre-wrap;
+  background: var(--editor-bg);
   color: var(--muted);
+  border-radius: 0;
+}
+
+.app-dialog-actions {
+  padding: 0.65rem 0.85rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
 }
