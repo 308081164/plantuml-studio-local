@@ -136,9 +136,17 @@
             <span class="agent-project-badge" title="对应《UML大师-Agent-开发计划》第 11 节 · M3 Beta">2.0 Beta</span>
           </div>
           <p class="agent-project-hint">
-            选择本地工程根目录后，客户端在<strong>本机</strong>生成路径树与少量源码节选；点击一键生成时，上述摘要会与「自然语言需求」一并发送至
-            DeepSeek。请勿选择含密钥、隐私数据的目录；建议仓库已配置 .gitignore。
+            选择本地工程根目录后，客户端在<strong>本机</strong>生成索引；一键生成时先经 DeepSeek「规划」选出少量关键文件，再读取正文与制图目标一并发送。默认尊重
+            <code>.gitignore</code>（简化匹配）并排除常见密钥路径；下列忽略规则与之叠加。若粗算总上下文超过约 100 万 tokens，将中止并提示缩小范围或新开会话（不自动压缩）。
           </p>
+          <label for="cfg-project-ignore-globs" class="agent-project-label">自定义忽略（每行一条 glob，保存设置后生效）</label>
+          <textarea
+            id="cfg-project-ignore-globs"
+            class="agent-project-ignore"
+            rows="2"
+            spellcheck="false"
+            placeholder="例如：**/dist/** 或 *.min.js"
+          ></textarea>
           <div class="agent-project-row">
             <input id="project-root-display" type="text" readonly placeholder="未选择项目目录…" title="当前项目根路径" />
             <button type="button" id="btn-project-pick">选择项目文件夹…</button>
@@ -146,8 +154,11 @@
           </div>
           <pre id="project-summary-preview" class="project-summary-preview hidden" aria-label="目录摘要预览"></pre>
           <div class="agent-project-actions">
+            <button type="button" id="btn-project-estimate" class="ghost" title="不调用 DeepSeek，仅按启发式选文件粗算首轮消息 tokens">
+              估算上下文
+            </button>
             <button type="button" id="btn-project-generate" class="primary">
-              一键生成：目录摘要 + 上方「自然语言需求」
+              一键生成：规划选文件 + 源码 +「自然语言需求」
             </button>
           </div>
         </div>

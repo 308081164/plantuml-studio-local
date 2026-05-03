@@ -630,6 +630,28 @@ button:hover {
   color: var(--muted);
 }
 
+.agent-project-label {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 0.25rem;
+}
+
+.agent-project-ignore {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 0.5rem;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--editor-bg);
+  color: var(--text);
+  resize: vertical;
+  min-height: 2.5rem;
+}
+
 .agent-project-row {
   display: flex;
   flex-wrap: wrap;
@@ -651,6 +673,10 @@ button:hover {
 
 .agent-project-actions {
   margin-top: 0.45rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
 }
 
 .project-summary-preview {

@@ -10,6 +10,11 @@ const $ = (id) => document.getElementById(id);
 /** 当前选择的项目根目录（与主进程配置 lastProjectRoot 同步） */
 let selectedProjectRoot = '';
 
+function projectIgnoreGlobsValue() {
+  const el = $('cfg-project-ignore-globs');
+  return el ? el.value : '';
+}
+
 function setStatus(text, ok) {
   const el = $('status');
   el.textContent = text;
@@ -470,6 +475,8 @@ async function loadAgentForm() {
     $('cfg-base-url').value = c.baseUrl || '';
     $('cfg-model').value = c.model || '';
     $('cfg-max-retries').value = String(c.maxRetries ?? 3);
+    const ig = $('cfg-project-ignore-globs');
+    if (ig) ig.value = c.projectIgnoreGlobs || '';
     selectedProjectRoot = String(c.lastProjectRoot || '').trim();
     const pr = $('project-root-display');
     if (pr) pr.value = selectedProjectRoot;
@@ -511,6 +518,7 @@ async function saveAgentForm() {
       baseUrl: $('cfg-base-url').value,
       model: $('cfg-model').value,
       maxRetries: Number($('cfg-max-retries').value),
+      projectIgnoreGlobs: projectIgnoreGlobsValue(),
     });
     const nowKey = $('cfg-api-key').value.trim();
     const bar = $('agent-compact-bar');
@@ -603,6 +611,35 @@ async function pickProjectDirectory() {
   await refreshProjectSummary();
 }
 
+async function estimateProjectContext() {
+  if (!window.studio?.projectContextEstimate) return;
+  if (!selectedProjectRoot) {
+    setStatus('请先选择项目目录', false);
+    return;
+  }
+  setStatus('正在估算上下文体积（不调用 DeepSeek）…', null);
+  try {
+    const r = await window.studio.projectContextEstimate({
+      rootPath: selectedProjectRoot,
+      userSample: $('agent-request').value.trim(),
+      ignoreGlobsText: projectIgnoreGlobsValue(),
+    });
+    if (!r?.ok) {
+      setStatus(r?.error || '估算失败', false);
+      return;
+    }
+    const warn = r.exceedsProductLimit
+      ? ' 已超过产品粗算上限（约 100 万 tokens），正式生成将被拒绝；请缩小目录或增加忽略规则。'
+      : '';
+    setStatus(
+      `粗算首轮约 ${r.estimatedTokens} tokens；可分析文件 ${r.manifestFileEntries} 个、正文聚合 ${r.bundleFileCount} 个；密钥模式已跳过 ${r.skippedSecrets} 条路径。${warn}`,
+      !r.exceedsProductLimit
+    );
+  } catch (e) {
+    setStatus(String(e.message || e), false);
+  }
+}
+
 async function runAgentProjectOneClick() {
   if (!window.studio?.runAgentProject) return;
   const goal = $('agent-request').value.trim();
@@ -615,11 +652,12 @@ async function runAgentProjectOneClick() {
     return;
   }
   setAgentLog('', false);
-  setStatus('DeepSeek 结合项目目录分析中…', null);
+  setStatus('DeepSeek 规划选文件 + 制图运行中…', null);
   try {
     const r = await window.studio.runAgentProject({
       userText: goal,
       projectRoot: selectedProjectRoot,
+      ignoreGlobsText: projectIgnoreGlobsValue(),
     });
     await applyAgentRunResult(r);
   } catch (e) {
@@ -644,6 +682,7 @@ function init() {
 
   $('btn-project-pick')?.addEventListener('click', () => pickProjectDirectory());
   $('btn-project-scan')?.addEventListener('click', () => refreshProjectSummary());
+  $('btn-project-estimate')?.addEventListener('click', () => estimateProjectContext());
   $('btn-project-generate')?.addEventListener('click', () => runAgentProjectOneClick());
 
   $('btn-stash-add').addEventListener('click', () => addCurrentToStash());

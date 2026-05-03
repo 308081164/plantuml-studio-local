@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('studio', {
   pickProjectDirectory: () => ipcRenderer.invoke('studio:pick-project-directory'),
   projectSummary: (rootPath) => ipcRenderer.invoke('studio:project-summary', { rootPath }),
   runAgentProject: (payload) => ipcRenderer.invoke('studio:agent-run-project', payload),
+  projectContextEstimate: (payload) => ipcRenderer.invoke('studio:project-context-estimate', payload),
   onMenuCopyPreview: (cb) => {
     menuCopyPreviewHandler = typeof cb === 'function' ? cb : null;
     return () => {

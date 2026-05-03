@@ -6,7 +6,24 @@ import { createInterface } from 'node:readline';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildZhMenu } from './scripts/app-menu.mjs';
-import { buildProjectSummary } from './scripts/project-index.mjs';
+import {
+  buildProjectSummary,
+  CHARS_PER_TOKEN_EST,
+  collectProjectManifest,
+  estimateTokens,
+  heuristicPrioritizedPaths,
+  MAX_ASSEMBLED_USER_TOKENS,
+  parseIgnoreGlobLines,
+} from './scripts/project-index.mjs';
+import {
+  assembleUserBlock,
+  buildFileBundle,
+  buildProjectUserBlockParts,
+  checkAssembledContextLimit,
+  computeBundleCharBudget,
+  formatManifestJsonl,
+  parsePlannerPaths,
+} from './scripts/project-context.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -22,6 +39,8 @@ const DEFAULT_AGENT = {
   maxRetries: 3,
   /** 上次选择的项目根目录（仅本地配置，不提交仓库） */
   lastProjectRoot: '',
+  /** 自定义忽略 glob，一行一条（与 .gitignore 叠加） */
+  projectIgnoreGlobs: '',
 };
 
 function agentConfigPath() {
@@ -42,6 +61,12 @@ function loadAgentConfig() {
       model: typeof j.model === 'string' && j.model.trim() ? j.model.trim() : DEFAULT_AGENT.model,
       maxRetries: Number.isFinite(Number(j.maxRetries)) ? Math.max(0, Math.min(15, Number(j.maxRetries))) : DEFAULT_AGENT.maxRetries,
       lastProjectRoot: typeof j.lastProjectRoot === 'string' ? j.lastProjectRoot : '',
+      projectIgnoreGlobs:
+        typeof j.projectIgnoreGlobs === 'string'
+          ? j.projectIgnoreGlobs
+          : Array.isArray(j.projectIgnoreGlobs)
+            ? j.projectIgnoreGlobs.map(String).join('\n')
+            : '',
     };
   } catch {
     return { ...DEFAULT_AGENT };
@@ -62,6 +87,7 @@ function saveAgentConfig(partial) {
   };
   if (partial.apiKey !== undefined) next.apiKey = String(partial.apiKey);
   if (partial.lastProjectRoot !== undefined) next.lastProjectRoot = String(partial.lastProjectRoot);
+  if (partial.projectIgnoreGlobs !== undefined) next.projectIgnoreGlobs = String(partial.projectIgnoreGlobs);
   const dir = dirname(agentConfigPath());
   mkdirSync(dir, { recursive: true });
   writeFileSync(agentConfigPath(), JSON.stringify(next, null, 2), 'utf8');
@@ -103,8 +129,17 @@ function buildAgentSystemPrompt(kbSnippet) {
 }
 
 function buildAgentSystemPromptForProject(kbSnippet) {
-  return `${buildAgentSystemPrompt(kbSnippet)}\n\n【项目模式】用户会提供本地工程目录的机器可读摘要（路径树与少量源码节选）。请结合摘要与制图目标输出**一张**最合适的 UML/架构类 PlantUML；用 note 标明假设与未覆盖部分。`;
+  return `${buildAgentSystemPrompt(kbSnippet)}\n\n【项目模式】用户会提供本地工程目录的索引与「规划阶段」选出的若干源文件全文（受控长度）。请结合这些内容制图；若仍有信息缺口，在图中用 note 标明假设与未读到的模块。`;
 }
+
+const PROJECT_PLANNER_SYSTEM = [
+  '你是资深软件架构分析助手。',
+  '用户会给出「制图目标」和一份 JSONL 文件清单（每行一个 JSON：path, bytes, ext, head）。',
+  '你必须只输出一个 JSON 对象，不要使用 markdown 代码围栏。',
+  'JSON 格式：{"paths":["相对路径1", ...], "rationale":"一句话说明为何选这些文件"}。',
+  'paths 数组最多 35 个字符串，且每个必须原样来自清单中的 path 字段。',
+  '优先选择能支撑用例图/类图/时序图/部署图推断的：入口、路由、领域模型、API、配置与依赖声明。',
+].join('');
 
 function extractPlantumlFromModelText(text) {
   if (!text || typeof text !== 'string') return '';
@@ -223,23 +258,95 @@ async function runAgentPipeline(userText) {
   return { ok: false, source, error: lastErr || '已达最大重试次数', logs };
 }
 
-async function runAgentPipelineWithProject(userText, projectRoot) {
+async function runAgentPipelineWithProject(userText, projectRoot, ignoreGlobsText) {
   const root = String(projectRoot || '').trim();
   if (!root) return { ok: false, error: '未选择项目目录', logs: [] };
 
-  let summaryPayload;
+  const cfg = loadAgentConfig();
+  const rawGlobs =
+    ignoreGlobsText !== undefined && ignoreGlobsText !== null ? String(ignoreGlobsText) : cfg.projectIgnoreGlobs || '';
+  const userPatterns = parseIgnoreGlobLines(rawGlobs);
+
+  let manifest;
   try {
-    summaryPayload = buildProjectSummary(root);
+    manifest = collectProjectManifest(root, { userIgnoreGlobs: userPatterns });
   } catch (e) {
     return { ok: false, error: String(e.message || e), logs: [] };
   }
 
-  const { summary, stats } = summaryPayload;
-  const cfg = loadAgentConfig();
+  const { text: manifestJsonl, truncated: manifestTruncated, lineCount: manifestLineCount, totalFiles } =
+    formatManifestJsonl(manifest.files, 2200);
+
+  const plannerUser = [
+    '【制图目标】',
+    String(userText || '').trim(),
+    '',
+    '【仓库文件清单 JSONL（path 必须在输出的 paths 中原样出现；若清单截断则仅从下列 path 中选）】',
+    manifestJsonl,
+    manifestTruncated ? `\n… 另有约 ${Math.max(0, totalFiles - manifestLineCount)} 条未列出` : '',
+    '',
+    '只输出 JSON：{"paths":[],"rationale":""}。paths 最多 35 项。勿使用 markdown 围栏。',
+  ].join('\n');
+
   const logs = [
     `项目目录：${root}`,
-    `本地扫描：约 ${stats.entries} 条路径，${stats.snippetCount} 段节选，已写入首轮提示（节选将发往 DeepSeek）。`,
+    `索引：约 ${manifest.stats.fileCount} 个可分析文本文件；密钥模式已跳过 ${manifest.stats.skippedSecrets} 条；自定义忽略 ${manifest.stats.skippedUserIgnore} 条；.gitignore 近似跳过 ${manifest.stats.skippedGitignore} 条。`,
   ];
+  if (manifest.stats.hitCap) logs.push('提示：已达本地清单条目上限，超大仓库可能不完整。');
+
+  const validPaths = new Set(manifest.files.map((f) => f.path));
+  let rationale = '';
+  let selectedPaths = [];
+
+  try {
+    const plannerRaw = await deepseekChat(cfg, [
+      { role: 'system', content: PROJECT_PLANNER_SYSTEM },
+      { role: 'user', content: plannerUser },
+    ]);
+    const pr = parsePlannerPaths(plannerRaw);
+    rationale = pr.rationale || '';
+    selectedPaths = (pr.paths || []).filter((p) => validPaths.has(p)).slice(0, 35);
+    logs.push(`规划阶段：模型选出 ${selectedPaths.length} 个文件路径。`);
+  } catch (e) {
+    logs.push(`规划阶段 DeepSeek 不可用或失败：${String(e.message || e)}；已改用本地启发式。`);
+    selectedPaths = heuristicPrioritizedPaths(manifest.files, 35);
+  }
+
+  if (!selectedPaths.length) {
+    selectedPaths = heuristicPrioritizedPaths(manifest.files, 35);
+    logs.push('规划结果为空，已改用本地启发式选文件。');
+  }
+
+  const { header, footer } = buildProjectUserBlockParts({
+    root,
+    userGoal: String(userText || '').trim(),
+    manifestLineCount,
+    manifestTruncated,
+    skippedSecrets: manifest.stats.skippedSecrets,
+    plannerRationale: rationale,
+    shortTree: manifest.shortTreeLines,
+  });
+
+  let budgetChars = computeBundleCharBudget(`${header}\n`, footer);
+  budgetChars = Math.max(14_000, Math.min(budgetChars, 400_000));
+
+  const bundle = buildFileBundle(root, selectedPaths, {
+    perFileMaxChars: 76_000,
+    totalMaxChars: budgetChars,
+  });
+  if (bundle.notes.length) logs.push(`文件读取：${bundle.notes.slice(0, 5).join('；')}`);
+
+  const firstUserBlock = assembleUserBlock(header, bundle.text, footer);
+
+  const limitCheck = checkAssembledContextLimit(firstUserBlock);
+  if (!limitCheck.ok) {
+    logs.push(`首轮消息粗算约 ${limitCheck.estimatedTokens} tokens。`);
+    return { ok: false, error: limitCheck.message, logs, source: '' };
+  }
+  logs.push(
+    `首轮用户消息粗算约 ${estimateTokens(firstUserBlock)} tokens（≈字符/${CHARS_PER_TOKEN_EST}）；正文含 ${bundle.usedPaths.length} 个文件。`
+  );
+
   const kb = readKnowledgeBaseSnippet();
   const system = buildAgentSystemPromptForProject(kb);
   const maxExtra = cfg.maxRetries;
@@ -247,19 +354,6 @@ async function runAgentPipelineWithProject(userText, projectRoot) {
 
   let source = '';
   let lastErr = '';
-
-  const firstUserBlock = [
-    '【项目工作目录（用户已授权）】',
-    root,
-    '',
-    '【目录与源码摘要（本地生成，节选将发往云端模型）】',
-    summary,
-    '',
-    '【制图目标】',
-    userText,
-    '',
-    '请输出完整可渲染的 PlantUML 源码（建议单图）。',
-  ].join('\n');
 
   for (let round = 0; round < maxRounds; round++) {
     const userContent =
@@ -589,11 +683,53 @@ function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle('studio:agent-run-project', async (_e, { userText, projectRoot }) => {
+  /** 不调用 DeepSeek：按当前忽略规则 + 启发式选文件，粗算首轮将发送的 tokens */
+  ipcMain.handle('studio:project-context-estimate', async (_e, { rootPath, userSample, ignoreGlobsText }) => {
+    try {
+      const root = String(rootPath || '').trim();
+      if (!root) return { ok: false, error: '未选择项目目录' };
+      const cfg = loadAgentConfig();
+      const rawGlobs =
+        ignoreGlobsText !== undefined && ignoreGlobsText !== null ? String(ignoreGlobsText) : cfg.projectIgnoreGlobs || '';
+      const userPatterns = parseIgnoreGlobLines(rawGlobs);
+      const manifest = collectProjectManifest(root, { userIgnoreGlobs: userPatterns });
+      const mfLen = Math.min(2200, manifest.files.length);
+      const { header, footer } = buildProjectUserBlockParts({
+        root,
+        userGoal: String(userSample || '').trim() || '（空需求占位）',
+        manifestLineCount: mfLen,
+        manifestTruncated: manifest.files.length > 2200,
+        skippedSecrets: manifest.stats.skippedSecrets,
+        plannerRationale: '',
+        shortTree: manifest.shortTreeLines,
+      });
+      let budgetChars = computeBundleCharBudget(`${header}\n`, footer);
+      budgetChars = Math.max(14_000, Math.min(budgetChars, 400_000));
+      const paths = heuristicPrioritizedPaths(manifest.files, 35);
+      const bundle = buildFileBundle(root, paths, {
+        perFileMaxChars: 76_000,
+        totalMaxChars: budgetChars,
+      });
+      const full = assembleUserBlock(header, bundle.text, footer);
+      const est = estimateTokens(full);
+      return {
+        ok: true,
+        estimatedTokens: est,
+        exceedsProductLimit: est > MAX_ASSEMBLED_USER_TOKENS,
+        manifestFileEntries: manifest.stats.fileCount,
+        bundleFileCount: bundle.usedPaths.length,
+        skippedSecrets: manifest.stats.skippedSecrets,
+      };
+    } catch (e) {
+      return { ok: false, error: String(e.message || e) };
+    }
+  });
+
+  ipcMain.handle('studio:agent-run-project', async (_e, { userText, projectRoot, ignoreGlobsText }) => {
     try {
       const text = String(userText || '').trim();
       if (!text) return { ok: false, error: '请填写「自然语言需求」作为制图目标', logs: [] };
-      return await runAgentPipelineWithProject(text, projectRoot);
+      return await runAgentPipelineWithProject(text, projectRoot, ignoreGlobsText);
     } catch (e) {
       const msg = String(e.message || e);
       return { ok: false, error: msg, logs: [msg] };
