@@ -1,7 +1,6 @@
-# 方案 A：gh auth login（浏览器） + gh repo create 并推送
-# 在 PowerShell 中执行： cd 到 plantuml-desktop 后运行
-#   .\scripts\plan-a-github-push.ps1
-# 可选：先设置 $env:GH_TOKEN='ghp_…' 可跳过交互登录（需 repo 权限）
+# Plan A: gh auth login (browser) + gh repo create and push
+# Run from plantuml-desktop: .\scripts\plan-a-github-push.ps1
+# Optional: set $env:GH_TOKEN='ghp_...' to skip interactive login (needs repo scope)
 
 $ErrorActionPreference = 'Stop'
 $Gh = if (Test-Path 'C:\Program Files\GitHub CLI\gh.exe') {
@@ -16,21 +15,26 @@ Set-Location $Root
 $RepoName = if ($env:GITHUB_NEW_REPO) { $env:GITHUB_NEW_REPO } else { 'plantuml-studio-local' }
 $Vis = if ($env:GITHUB_REPO_VISIBILITY -eq 'private') { '--private' } else { '--public' }
 
-Write-Host "工作目录: $Root" -ForegroundColor Cyan
-Write-Host "将创建仓库: $RepoName ($Vis)" -ForegroundColor Cyan
+Write-Host "Working dir: $Root" -ForegroundColor Cyan
+Write-Host "Will create repo: $RepoName ($Vis)" -ForegroundColor Cyan
 
-& $Gh auth status 2>$null | Out-Null
+# Avoid stderr from gh breaking the run under $ErrorActionPreference = Stop
+cmd /c "`"$Gh`" auth status >nul 2>&1" | Out-Null
 if ($LASTEXITCODE -ne 0 -and -not $env:GH_TOKEN) {
-  Write-Host "`n尚未登录 GitHub CLI。将启动设备码/浏览器登录，请按提示在 https://github.com/login/device 完成授权。`n" -ForegroundColor Yellow
+  Write-Host ""
+  Write-Host "Not logged in. Starting gh auth login (web). Open https://github.com/login/device when prompted." -ForegroundColor Yellow
+  Write-Host ""
   & $Gh auth login --hostname github.com --git-protocol https --web
 }
 
-& $Gh auth status
+cmd /c "`"$Gh`" auth status >nul 2>&1" | Out-Null
 if ($LASTEXITCODE -ne 0) {
-  throw 'gh 仍未登录。请完成 gh auth login，或设置环境变量 GH_TOKEN 后重试。'
+  throw 'gh is still not authenticated. Run: gh auth login   OR set env GH_TOKEN, then retry.'
 }
 
-Write-Host "`n正在创建远程仓库并推送…" -ForegroundColor Green
+Write-Host ""
+Write-Host "Creating remote and pushing..." -ForegroundColor Green
 & $Gh repo create $RepoName $Vis --source=. --remote=origin --push
 
-Write-Host "`n完成。远程: origin → GitHub 仓库 $RepoName" -ForegroundColor Green
+Write-Host ""
+Write-Host "Done. remote origin -> GitHub repo $RepoName" -ForegroundColor Green
