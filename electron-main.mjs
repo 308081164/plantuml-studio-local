@@ -132,6 +132,10 @@ function buildAgentSystemPromptForProject(kbSnippet) {
   return `${buildAgentSystemPrompt(kbSnippet)}\n\n【项目模式】用户会提供本地工程目录的索引与「规划阶段」选出的若干源文件全文（受控长度）。请结合这些内容制图；若仍有信息缺口，在图中用 note 标明假设与未读到的模块。`;
 }
 
+/** 附在 PlantUML 校验失败后的修正轮 user 消息中，针对高频语法坑（如 title 行内字面 \\n） */
+const PLANTUML_RETRY_HINT =
+  '\n\n【PlantUML 常见修复】`title` 只能写单行标题；不要在 `title ...` 内写字面量 `\\n` 或拆成第二行。副标题请用 `caption ...`、`header` / `right header` 或 `floating note`。请输出与下面「当前源码」不完全相同、且可被 PlantUML 解析的完整源码。';
+
 const PROJECT_PLANNER_SYSTEM = [
   '你是资深软件架构分析助手。',
   '用户会给出「制图目标」和一份 JSONL 文件清单（每行一个 JSON：path, bytes, ext, head）。',
@@ -141,17 +145,31 @@ const PROJECT_PLANNER_SYSTEM = [
   '优先选择能支撑用例图/类图/时序图/部署图推断的：入口、路由、领域模型、API、配置与依赖声明。',
 ].join('');
 
+/**
+ * 从模型整段回复中取出 PlantUML。修正轮次模型常在文首保留旧版 fenced 块、在文末再给新版，
+ * 若始终取「第一个」非贪婪 ``` 块会导致多轮校验永远对着同一份源码（用户日志中多轮字符数相同即此类问题）。
+ */
 function extractPlantumlFromModelText(text) {
   if (!text || typeof text !== 'string') return '';
-  const fenced = text.match(/```(?:plantuml|puml|uml)?\s*([\s\S]*?)```/i);
-  if (fenced) {
-    const inner = fenced[1].trim();
+  const fenceRe = /```(?:plantuml|puml|uml)?\s*([\s\S]*?)```/gi;
+  const fencedBodies = [];
+  let fm;
+  while ((fm = fenceRe.exec(text)) !== null) {
+    fencedBodies.push(fm[1].trim());
+  }
+  for (let i = fencedBodies.length - 1; i >= 0; i--) {
+    const inner = fencedBodies[i];
     const m = inner.match(/@start[\w]*[\s\S]*?@end[\w]*/i);
     if (m) return m[0].trim();
     if (inner.includes('@start')) return inner;
   }
-  const direct = text.match(/@start[\w]*[\s\S]*?@end[\w]*/i);
-  if (direct) return direct[0].trim();
+  const nakedRe = /@start[\w]*[\s\S]*?@end[\w]*/gi;
+  let lastNaked = null;
+  let nm;
+  while ((nm = nakedRe.exec(text)) !== null) {
+    lastNaked = nm[0];
+  }
+  if (lastNaked) return lastNaked.trim();
   return text.trim();
 }
 
@@ -174,11 +192,16 @@ async function plantumlRenderCheck(source, options = ['-tpng']) {
   return { ok, buffer: buf, errText: errText || undefined };
 }
 
-async function deepseekChat(config, messages) {
+async function deepseekChat(config, messages, options = {}) {
   const base = config.baseUrl.replace(/\/$/, '');
   const url = `${base}/v1/chat/completions`;
   const key = (config.apiKey || '').trim();
   if (!key) throw new Error('未配置 DeepSeek API Key');
+
+  const temperature =
+    typeof options.temperature === 'number' && Number.isFinite(options.temperature)
+      ? Math.min(1.5, Math.max(0, options.temperature))
+      : 0.2;
 
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), 120000);
@@ -193,7 +216,7 @@ async function deepseekChat(config, messages) {
       body: JSON.stringify({
         model: config.model,
         messages,
-        temperature: 0.2,
+        temperature,
       }),
       signal: controller.signal,
     });
@@ -221,18 +244,32 @@ async function runAgentPipeline(userText) {
 
   let source = '';
   let lastErr = '';
+  let lastExtracted = '';
+  let noRepeatHint = false;
 
   for (let round = 0; round < maxRounds; round++) {
+    const dupTail = noRepeatHint
+      ? '\n\n【再次强调】你上一版输出的 PlantUML 与「当前源码」逐字相同，属于无效修复；必须实质性改写（尤其错误信息中的行号附近），禁止重复同一 fenced 块。'
+      : '';
+    noRepeatHint = false;
+
     const userContent =
       round === 0
         ? `用户需求：\n${userText}\n\n请输出完整可渲染的 PlantUML 源码。`
-        : `上一版源码经 PlantUML 校验未通过，请根据错误信息修订后，再次输出完整源码（整段替换）。\n\n--- 错误 ---\n${lastErr}\n\n--- 当前源码 ---\n${source}`;
+        : `上一版源码经 PlantUML 校验未通过，请根据错误信息修订后，再次输出完整源码（整段替换）。${PLANTUML_RETRY_HINT}${dupTail}\n\n--- 错误 ---\n${lastErr}\n\n--- 当前源码 ---\n${source}`;
 
-    const raw = await deepseekChat(cfg, [
-      { role: 'system', content: system },
-      { role: 'user', content: userContent },
-    ]);
-    source = extractPlantumlFromModelText(raw);
+    const raw = await deepseekChat(
+      cfg,
+      [{ role: 'system', content: system }, { role: 'user', content: userContent }],
+      { temperature: round > 0 ? 0.58 : 0.2 }
+    );
+    const extracted = extractPlantumlFromModelText(raw);
+    if (round > 0 && extracted === lastExtracted && lastExtracted.length > 20) {
+      noRepeatHint = true;
+      logs.push(`第 ${round + 1} 轮：提取结果与上一轮完全相同（${extracted.length} 字符），下一轮将加重「禁止重复」提示并提高采样温度。`);
+    }
+    lastExtracted = extracted;
+    source = extracted;
     if (!source.includes('@start') || !source.includes('@end')) {
       lastErr = '模型输出中未找到 @start...@end 结构的 PlantUML';
       logs.push(`第 ${round + 1} 轮：${lastErr}`);
@@ -354,18 +391,32 @@ async function runAgentPipelineWithProject(userText, projectRoot, ignoreGlobsTex
 
   let source = '';
   let lastErr = '';
+  let lastExtracted = '';
+  let noRepeatHint = false;
 
   for (let round = 0; round < maxRounds; round++) {
+    const dupTail = noRepeatHint
+      ? '\n\n【再次强调】你上一版输出的 PlantUML 与「当前源码」逐字相同，属于无效修复；必须实质性改写报错行附近（见错误中的 line），禁止重复同一 fenced 块。'
+      : '';
+    noRepeatHint = false;
+
     const userContent =
       round === 0
         ? firstUserBlock
-        : `上一版源码经 PlantUML 校验未通过，请结合项目上下文修订后，再次输出完整源码（整段替换）。\n\n--- 错误 ---\n${lastErr}\n\n--- 当前源码 ---\n${source}`;
+        : `上一版源码经 PlantUML 校验未通过，请结合项目上下文修订后，再次输出完整源码（整段替换）。${PLANTUML_RETRY_HINT}${dupTail}\n\n--- 错误 ---\n${lastErr}\n\n--- 当前源码 ---\n${source}`;
 
-    const raw = await deepseekChat(cfg, [
-      { role: 'system', content: system },
-      { role: 'user', content: userContent },
-    ]);
-    source = extractPlantumlFromModelText(raw);
+    const raw = await deepseekChat(
+      cfg,
+      [{ role: 'system', content: system }, { role: 'user', content: userContent }],
+      { temperature: round > 0 ? 0.58 : 0.2 }
+    );
+    const extracted = extractPlantumlFromModelText(raw);
+    if (round > 0 && extracted === lastExtracted && lastExtracted.length > 20) {
+      noRepeatHint = true;
+      logs.push(`第 ${round + 1} 轮：提取结果与上一轮完全相同（${extracted.length} 字符），下一轮将加重「禁止重复」提示并提高采样温度。`);
+    }
+    lastExtracted = extracted;
+    source = extracted;
     if (!source.includes('@start') || !source.includes('@end')) {
       lastErr = '模型输出中未找到 @start...@end 结构的 PlantUML';
       logs.push(`第 ${round + 1} 轮：${lastErr}`);
