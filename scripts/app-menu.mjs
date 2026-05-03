@@ -1,0 +1,109 @@
+import { app, Menu, dialog, BrowserWindow, shell } from 'electron';
+
+/** 构建中文应用菜单（Windows / Linux）；macOS 会追加应用菜单 */
+export function buildZhMenu() {
+  /** @type {Electron.MenuItemConstructorOptions[]} */
+  const template = [];
+
+  if (process.platform === 'darwin') {
+    template.push({
+      label: app.name,
+      submenu: [
+        { role: 'about', label: `关于 ${app.name}` },
+        { type: 'separator' },
+        { role: 'services', label: '服务' },
+        { type: 'separator' },
+        { role: 'hide', label: '隐藏' },
+        { role: 'hideOthers', label: '隐藏其他' },
+        { role: 'unhide', label: '显示全部' },
+        { type: 'separator' },
+        { role: 'quit', label: '退出' },
+      ],
+    });
+  }
+
+  template.push(
+    {
+      label: '文件',
+      submenu:
+        process.platform === 'darwin'
+          ? [{ role: 'close', label: '关闭窗口' }]
+          : [{ role: 'quit', label: '退出' }],
+    },
+    {
+      label: '编辑',
+      submenu: [
+        { role: 'undo', label: '撤销' },
+        { role: 'redo', label: '重做' },
+        { type: 'separator' },
+        { role: 'cut', label: '剪切' },
+        { role: 'copy', label: '复制' },
+        { role: 'paste', label: '粘贴' },
+        { role: 'pasteAndMatchStyle', label: '粘贴并匹配样式' },
+        { role: 'delete', label: '删除' },
+        { type: 'separator' },
+        {
+          label: '复制预览图到剪贴板（PNG）',
+          accelerator: 'Ctrl+Shift+Y',
+          click: () => {
+            const w = BrowserWindow.getFocusedWindow();
+            if (w && !w.isDestroyed()) w.webContents.send('studio:menu-copy-preview');
+          },
+        },
+        { type: 'separator' },
+        { role: 'selectAll', label: '全选' },
+      ],
+    },
+    {
+      label: '视图',
+      submenu: [
+        { role: 'reload', label: '重新加载', accelerator: 'Ctrl+R' },
+        { role: 'forceReload', label: '强制重新加载', accelerator: 'Ctrl+Shift+R' },
+        { role: 'toggleDevTools', label: '切换开发者工具', accelerator: 'Ctrl+Shift+I' },
+        { type: 'separator' },
+        { role: 'resetZoom', label: '实际大小', accelerator: 'Ctrl+0' },
+        { role: 'zoomIn', label: '放大', accelerator: 'Ctrl+=' },
+        { role: 'zoomOut', label: '缩小', accelerator: 'Ctrl+-' },
+        { type: 'separator' },
+        { role: 'togglefullscreen', label: '切换全屏幕', accelerator: 'F11' },
+      ],
+    },
+    {
+      label: '窗口',
+      submenu: [{ role: 'minimize', label: '最小化' }, { role: 'close', label: '关闭' }],
+    },
+    {
+      label: '帮助',
+      submenu: [
+        {
+          label: 'PlantUML 文档',
+          click: async () => {
+            await shell.openExternal('https://plantuml.com/zh/guide');
+          },
+        },
+        {
+          label: 'Eclipse Temurin 许可说明',
+          click: async () => {
+            await shell.openExternal('https://adoptium.net/docs/faq/');
+          },
+        },
+        { type: 'separator' },
+        {
+          label: '关于 PlantUML 本地工作室',
+          click: async () => {
+            const win = BrowserWindow.getFocusedWindow();
+            await dialog.showMessageBox(win || undefined, {
+              type: 'info',
+              title: '关于',
+              message: 'PlantUML 本地工作室',
+              detail: `版本 ${app.getVersion()}（M3 Beta：含项目目录摘要 + DeepSeek 一键制图）\n\n内置 PlantUML PicoWeb 与本机/捆绑 JRE 渲染；DeepSeek 仅在您主动使用智能功能时联网。\n\n任务栏：请右键桌面或开始菜单中的快捷方式，选择「固定到任务栏」。`,
+            });
+          },
+        },
+      ],
+    }
+  );
+
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
+}

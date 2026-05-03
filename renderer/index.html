@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src blob: data: 'self'; connect-src http://127.0.0.1:* http://localhost:* blob:; font-src 'self'; base-uri 'self'; form-action 'none';"
+    />
+    <title>PlantUML 本地工作室</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>PlantUML 本地工作室</h1>
+      <div class="toolbar">
+        <label class="fmt">
+          输出格式
+          <select id="format">
+            <option value="-tsvg" selected>SVG</option>
+            <option value="-tpng">PNG</option>
+          </select>
+        </label>
+        <button type="button" id="btn-render" class="primary">渲染预览</button>
+        <button type="button" id="btn-export">导出文件…</button>
+        <button type="button" id="btn-stash-add" title="将当前预览保存到下方暂存区，便于比对与批量管理">
+          加入暂存区
+        </button>
+        <button type="button" id="btn-agent-settings" class="ghost" title="已配置密钥时：展开/收起 DeepSeek 编排与 API；未配置时：聚焦密钥输入">
+          API 与智能生成
+        </button>
+        <span id="status" class="status"></span>
+      </div>
+    </header>
+    <main class="layout">
+      <section class="pane editor-pane">
+        <div class="pane-title">源码</div>
+        <textarea id="source" spellcheck="false"></textarea>
+      </section>
+      <section class="pane preview-pane">
+        <div class="pane-title">预览 <span class="pane-sub">右键可复制 PNG 到剪贴板</span></div>
+        <div id="preview-wrap" class="preview-wrap">
+          <div id="preview-placeholder" class="placeholder">点击「渲染预览」生成图像</div>
+          <div id="preview-svg" class="preview-svg hidden"></div>
+          <img id="preview-img" class="preview-img hidden" alt="预览" />
+        </div>
+        <pre id="errors" class="errors hidden"></pre>
+      </section>
+    </main>
+    <section id="stash-panel" class="stash-panel">
+      <div class="stash-bar">
+        <h2 class="stash-heading">产出物暂存区</h2>
+        <span id="stash-count" class="stash-count">0 项</span>
+        <div class="stash-bar-actions">
+          <button type="button" id="btn-stash-refresh">刷新</button>
+          <button type="button" id="btn-stash-select-all">全选</button>
+          <button type="button" id="btn-stash-select-none">取消全选</button>
+          <button type="button" id="btn-stash-delete-batch" class="stash-danger">批量删除</button>
+          <button type="button" id="btn-stash-collapse" class="ghost" title="折叠/展开暂存区">收起</button>
+        </div>
+      </div>
+      <div id="stash-body" class="stash-body">
+        <p id="stash-empty" class="stash-empty">暂无条目。渲染预览后点击「加入暂存区」即可持久保存，便于多图比对。</p>
+        <div id="stash-grid" class="stash-grid hidden"></div>
+      </div>
+    </section>
+    <dialog id="stash-view-dialog" class="stash-dialog">
+      <div class="stash-dialog-head">
+        <span id="stash-dialog-title" class="stash-dialog-title">查看</span>
+        <button type="button" id="stash-dialog-close" class="stash-dialog-close">关闭</button>
+      </div>
+      <div id="stash-dialog-content" class="stash-dialog-content"></div>
+    </dialog>
+    <section id="agent-wrap" class="agent-wrap">
+      <div id="agent-compact-bar" class="agent-compact-bar hidden" role="region" aria-label="DeepSeek 快捷入口">
+        <p id="agent-compact-msg" class="agent-compact-msg"></p>
+        <div class="agent-compact-actions">
+          <button type="button" id="btn-agent-collapse" class="hidden">收起</button>
+          <button type="button" id="btn-agent-expand-text" class="ghost">设置</button>
+          <button
+            type="button"
+            id="btn-agent-expand-gear"
+            class="agent-gear-btn"
+            title="展开 API 与编排说明"
+            aria-label="设置"
+          >
+            <svg class="agent-gear-svg" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.6-.22l-2.39.96c-.52-.4-1.08-.73-1.69-.98l-.36-2.54a.484.484 0 0 0-.48-.42h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.61.25-1.17.59-1.69.98l-2.39-.96c-.22-.08-.47 0-.6.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.31-.08.63-.08.94s.03.63.08.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.52.4 1.08.73 1.69.98l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.61-.25 1.17-.59 1.69-.98l2.39.96c.22.08.47 0 .6-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"
+              />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <section id="agent-panel" class="agent-panel">
+        <div id="agent-orchestration-block" class="agent-orchestration-block">
+          <div class="agent-head">
+            <h2 class="agent-title">DeepSeek 编排（需求 → PlantUML → 本地校验 → 自动修正）</h2>
+            <p class="agent-hint">
+              与仓库内《UML大师-Agent-开发计划》一致：仅调用 DeepSeek 官方兼容接口；PlantUML 使用本机未改 JAR；密钥保存在用户目录，不会写入仓库。
+            </p>
+          </div>
+          <div class="agent-grid">
+            <div class="agent-field">
+              <label for="cfg-api-key">DeepSeek API Key</label>
+              <input id="cfg-api-key" type="password" autocomplete="off" placeholder="在 platform.deepseek.com 获取" />
+            </div>
+            <div class="agent-field">
+              <label for="cfg-base-url">Base URL</label>
+              <input id="cfg-base-url" type="url" placeholder="https://api.deepseek.com" />
+            </div>
+            <div class="agent-field">
+              <label for="cfg-model">模型名</label>
+              <input id="cfg-model" type="text" placeholder="deepseek-chat" />
+            </div>
+            <div class="agent-field agent-field--narrow">
+              <label for="cfg-max-retries">失败后的修正轮数</label>
+              <input id="cfg-max-retries" type="number" min="0" max="15" step="1" title="首次生成失败后，最多再请求 DeepSeek 修正的次数" />
+            </div>
+            <div class="agent-actions">
+              <button type="button" id="btn-save-agent-cfg" class="primary">保存设置</button>
+            </div>
+          </div>
+        </div>
+        <div class="agent-nl">
+          <label for="agent-request">自然语言需求</label>
+          <textarea id="agent-request" rows="3" spellcheck="false" placeholder="例如：画一个用户登录的时序图，包含前端、网关、认证服务与数据库…"></textarea>
+          <div class="agent-nl-actions">
+            <button type="button" id="btn-agent-run" class="primary">生成 PlantUML 并填入编辑器</button>
+          </div>
+        </div>
+        <div class="agent-project">
+          <div class="agent-project-head">
+            <span class="agent-project-title">项目目录驱动制图</span>
+            <span class="agent-project-badge" title="对应《UML大师-Agent-开发计划》第 11 节 · M3 Beta">2.0 Beta</span>
+          </div>
+          <p class="agent-project-hint">
+            选择本地工程根目录后，客户端在<strong>本机</strong>生成路径树与少量源码节选；点击一键生成时，上述摘要会与「自然语言需求」一并发送至
+            DeepSeek。请勿选择含密钥、隐私数据的目录；建议仓库已配置 .gitignore。
+          </p>
+          <div class="agent-project-row">
+            <input id="project-root-display" type="text" readonly placeholder="未选择项目目录…" title="当前项目根路径" />
+            <button type="button" id="btn-project-pick">选择项目文件夹…</button>
+            <button type="button" id="btn-project-scan">刷新目录摘要</button>
+          </div>
+          <pre id="project-summary-preview" class="project-summary-preview hidden" aria-label="目录摘要预览"></pre>
+          <div class="agent-project-actions">
+            <button type="button" id="btn-project-generate" class="primary">
+              一键生成：目录摘要 + 上方「自然语言需求」
+            </button>
+          </div>
+        </div>
+        <pre id="agent-log" class="agent-log hidden"></pre>
+      </section>
+    </section>
+    <footer class="foot">
+      <small>渲染由本机 Java + PlantUML PicoWeb 完成；DeepSeek 仅在您使用「智能生成」时经 HTTPS 访问您配置的 Base URL。</small>
+    </footer>
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>

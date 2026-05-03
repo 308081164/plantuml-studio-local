@@ -1,0 +1,80 @@
+{
+  "name": "plantuml-studio-local",
+  "version": "2.0.0-beta.1",
+  "description": "本地 PlantUML 编辑预览（PicoWeb + Electron，M3 Beta：项目目录驱动制图）",
+  "main": "electron-main.mjs",
+  "type": "module",
+  "author": "",
+  "license": "GPL-3.0",
+  "scripts": {
+    "start": "electron .",
+    "prepare:jre": "node scripts/download-jre.mjs",
+    "pack": "electron-builder --dir",
+    "dist": "npm run prepare:jre && electron-builder --win --x64",
+    "dist:beta": "npm run prepare:jre && electron-builder --win --x64",
+    "dist:portable": "npm run prepare:jre && electron-builder --win --x64 portable",
+    "dist:nsis": "npm run prepare:jre && electron-builder --win --x64 nsis"
+  },
+  "build": {
+    "appId": "com.uml_master.plantuml-studio",
+    "productName": "PlantUML本地工作室",
+    "directories": {
+      "output": "release"
+    },
+    "icon": "assets/app-logo-512.png",
+    "files": [
+      "electron-main.mjs",
+      "preload.cjs",
+      "renderer/**/*",
+      "scripts/app-menu.mjs",
+      "scripts/project-index.mjs",
+      "assets/app-logo-512.png"
+    ],
+    "extraResources": [
+      {
+        "from": "../plantuml-master/build/libs",
+        "to": "plantuml",
+        "filter": ["plantuml-*.jar"]
+      },
+      {
+        "from": "vendor/jre",
+        "to": "jre",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../PlantUML-Agent-Knowledge-Base.md",
+        "to": "kb",
+        "filter": ["PlantUML-Agent-Knowledge-Base.md"]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "PlantUML本地工作室",
+      "installerLanguages": ["zh_CN", "en_US"],
+      "language": "2052",
+      "warningsAsErrors": false
+    }
+  },
+  "devDependencies": {
+    "adm-zip": "^0.5.16",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  }
+}

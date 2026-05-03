@@ -1,0 +1,7 @@
+node_modules/
+release/
+dist/
+*.log
+vendor/jre/
+vendor/_jre_extract/
+vendor/*.zip
