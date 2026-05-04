@@ -161,7 +161,31 @@ function buildAgentSystemPrompt(kbSnippet, cfg) {
    ❌ 错误写法：stop
    ✅ 正确写法：:结束;
 
-5️⃣ 每一步的输出结构（严格按顺序）：
+5️⃣ 【核心节点形状选择规则（**重要！）
+   - 处理/操作节点：:内容; <<task>>
+     直角矩形，表示对数据进行运算、赋值、转换等处理
+     使用场景：计算总分、格式转换、更新数据库、调用API、判断分支前的准备
+
+   - 输入/输出节点：:内容; <<save>>
+     平行四边形，表示与外部环境进行数据交互
+     使用场景：读取用户输入、打印报表、显示结果、从文件读数据
+
+   【判断原则：
+   矩形 <<task>>：内部逻辑改变数据的内容、结构或存储位置。只要数据"发生某种变化"（包括赋值、计算、判断分支前的准备），就用矩形。
+   平行四边形 <<save>>：数据从外部（键盘、文件、网络、传感器）进入系统，或从系统输出到外部（屏幕、打印机、文件）。数据"过路"而不改变其值、不产生新值。
+
+   【示例】
+   :计算总分 = 语文 + 数学; <<task>>
+   :请输入用户名; <<save>>
+   :显示错误信息"密码错误"; <<save>>
+   :从 order.csv 读取一行记录; <<save>>
+   :总分 = 语文 + 数学; <<task>>
+   :读取配置文件; <<save>>
+   :解析配置文件; <<task>>
+   :打印预览; <<save>>
+   :把用户输入保存到变量; <<save>>
+
+6️⃣ 每一步的输出结构（严格按顺序）：
    @startuml activity
    title [流程图标题]
    skinparam ActivityShape roundedbox
@@ -172,12 +196,12 @@ function buildAgentSystemPrompt(kbSnippet, cfg) {
      BackgroundColor white
      ArrowColor black
    }
-   :开始;
+   :开始; <<task>>
    [用户需求的流程图内容]
-   :结束;
+   :结束; <<task>>
    @enduml
 
-6️⃣ 完整示例参考（登录流程）：
+7️⃣ 完整示例参考（登录流程）：
 @startuml activity
 title 登录流程图（国内标准写法）
 skinparam ActivityShape roundedbox
@@ -188,35 +212,36 @@ skinparam activity {
   BackgroundColor white
   ArrowColor black
 }
-:开始;
-:用户打开登录页面;
-:输入用户名和密码;
-:点击登录按钮;
-:系统校验输入是否为空;
+:开始; <<task>>
+:用户打开登录页面; <<task>>
+:输入用户名和密码; <<save>>
+:点击登录按钮; <<task>>
+:系统校验输入是否为空; <<task>>
 if (用户名或密码为空?) then (是)
-  :提示"用户名或密码不能为空";
+  :提示"用户名或密码不能为空"; <<save>>
 else (否)
-  :系统查询用户信息;
+  :系统查询用户信息; <<task>>
   if (用户存在?) then (否)
-    :提示"用户不存在";
+    :提示"用户不存在"; <<save>>
   else (是)
-    :校验密码是否正确;
+    :校验密码是否正确; <<task>>
     if (密码正确?) then (否)
-      :提示"密码错误";
+      :提示"密码错误"; <<save>>
     else (是)
-      :生成登录令牌(Token);
-      :记录登录日志;
-      :跳转到系统主页;
-      :显示登录成功;
+      :生成登录令牌(Token); <<task>>
+      :记录登录日志; <<task>>
+      :跳转到系统主页; <<task>>
+      :显示登录成功; <<save>>
     endif
   endif
 endif
-:结束;
+:结束; <<task>>
 @enduml
 ===== 【国内高校模式强制禁止】 =====
 ❌ 绝对不允许写 start
 ❌ 绝对不允许写 stop
 ❌ 绝对不允许 @startuml 后面不加 activity
+❌ 开始/结束 一定要加 <<task>>
 ===== 【输出要求】 =====
 直接输出 PlantUML 代码即可，不要任何 Markdown 解释或代码块包裹（除非你想，但代码块里的内容必须是完整 PlantUML）。
 ` : '';

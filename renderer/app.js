@@ -17,26 +17,26 @@ skinparam activity {
   ArrowColor black
 }
 
-:开始;
+:开始; <<task>>
 
-:输入系数a,b,c的值;
+:输入系数a,b,c的值; <<save>>
 
 if (|a| <= 10^-6?) then (Y)
-  :提示"不是二次方程";
+  :提示"不是二次方程"; <<save>>
 else (N)
-  :disc = b^2 - 4ac;
+  :disc = b^2 - 4ac; <<task>>
   if (disc <= 10^-6?) then (Y)
-    :输出两个相等实根p;
+    :输出两个相等实根p; <<save>>
   else (N)
     if (disc > 0?) then (Y)
-      :输出两个不等实根p±q;
+      :输出两个不等实根p±q; <<save>>
     else (N)
-      :输出两个共轭复根p±qi;
+      :输出两个共轭复根p±qi; <<save>>
     endif
   endif
 endif
 
-:结束;
+:结束; <<task>>
 
 @enduml
 `;
