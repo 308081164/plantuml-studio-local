@@ -762,3 +762,131 @@ button:hover {
   justify-content: flex-end;
   border-top: 1px solid var(--border);
 }
+
+/* ============================================================
+ * 授权激活对话框
+ * ============================================================ */
+
+.license-dialog-body {
+  padding: 1rem 0.85rem;
+  max-height: min(80vh, 600px);
+  overflow: auto;
+}
+
+.license-status-area {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: var(--bg);
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+.license-status-icon {
+  font-size: 1.8rem;
+  flex-shrink: 0;
+}
+
+.license-status-text {
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.license-section-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.license-device-area {
+  margin-bottom: 1rem;
+}
+
+.license-device-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+  font-size: 0.82rem;
+  flex-wrap: wrap;
+}
+
+.license-device-label {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.license-device-value {
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 0.78rem;
+  background: var(--editor-bg);
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  word-break: break-all;
+}
+
+.license-device-code {
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--accent);
+}
+
+.license-hint {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.license-activate-area {
+  margin-top: 0.5rem;
+}
+
+.license-code-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem;
+  font-size: 0.82rem;
+  font-family: "Cascadia Code", "Consolas", monospace;
+  background: var(--editor-bg);
+  color: var(--text);
+  resize: vertical;
+  min-height: 3.5rem;
+}
+
+.license-code-input:focus {
+  box-shadow: inset 0 0 0 1px var(--accent);
+  outline: none;
+}
+
+.license-activate-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.license-deactivate-btn {
+  color: var(--error) !important;
+}
+
+.license-activate-result {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem;
+  background: var(--editor-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow: auto;
+}

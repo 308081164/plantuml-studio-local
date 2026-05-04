@@ -21,13 +21,17 @@
             <option value="-tpng">PNG</option>
           </select>
         </label>
+        <label class="fmt">
+          <input type="checkbox" id="china-univ-mode" />
+          国内高校模式
+        </label>
         <button type="button" id="btn-render" class="primary">渲染预览</button>
         <button type="button" id="btn-export">导出文件…</button>
         <button type="button" id="btn-stash-add" title="将当前预览保存到下方暂存区，便于比对与批量管理">
           加入暂存区
         </button>
-        <button type="button" id="btn-agent-settings" class="ghost" title="已配置密钥时：展开/收起 DeepSeek 编排与 API；未配置时：聚焦密钥输入">
-          API 与智能生成
+        <button type="button" id="btn-agent-settings" class="ghost" title="已配置密钥时：展开/收起 DeepSeek 编排与 API；未配置密钥时：聚焦密钥输入">
+          API与智能生成
         </button>
         <span id="status" class="status"></span>
       </div>
@@ -202,9 +206,45 @@
         <button type="button" id="project-imported-ok" class="primary">确定</button>
       </div>
     </dialog>
+    <dialog id="license-dialog" class="app-dialog app-dialog--wide">
+      <div class="app-dialog-head">
+        <h3 class="app-dialog-title">授权激活</h3>
+        <button type="button" id="license-dialog-close" class="app-dialog-close">关闭</button>
+      </div>
+      <div id="license-dialog-body" class="license-dialog-body">
+        <!-- 状态区域 -->
+        <div id="license-status-area" class="license-status-area">
+          <div id="license-status-icon" class="license-status-icon">🔒</div>
+          <div id="license-status-text" class="license-status-text">正在检查授权状态…</div>
+        </div>
+        <!-- 设备信息区域 -->
+        <div id="license-device-area" class="license-device-area hidden">
+          <div class="license-section-title">设备信息</div>
+          <div class="license-device-row">
+            <span class="license-device-label">设备指纹 (HW_ID)：</span>
+            <code id="license-hw-id" class="license-device-value"></code>
+          </div>
+          <div class="license-device-row">
+            <span class="license-device-label">激活设备码：</span>
+            <code id="license-device-code" class="license-device-value license-device-code"></code>
+            <button type="button" id="btn-license-copy-device-code" class="ghost" title="复制激活设备码">复制</button>
+          </div>
+          <p class="license-hint">请将以上激活设备码提供给管理员，管理员将为您生成软件激活码。</p>
+        </div>
+        <!-- 激活表单 -->
+        <div id="license-activate-area" class="license-activate-area hidden">
+          <div class="license-section-title">输入软件激活码</div>
+          <textarea id="license-code-input" class="license-code-input" rows="3" spellcheck="false" placeholder="请粘贴管理员提供的软件激活码…"></textarea>
+          <div class="license-activate-actions">
+            <button type="button" id="btn-license-activate" class="primary">激活</button>
+            <button type="button" id="btn-license-deactivate" class="ghost license-deactivate-btn">卸载激活</button>
+          </div>
+          <pre id="license-activate-result" class="license-activate-result hidden"></pre>
+        </div>
+      </div>
+    </dialog>
     <footer class="foot">
       <small>渲染由本机 Java + PlantUML PicoWeb 完成；DeepSeek 仅在您使用「智能生成」时经 HTTPS 访问您配置的 Base URL。</small>
     </footer>
     <script src="./app.js" type="module"></script>
   </body>
-</html>

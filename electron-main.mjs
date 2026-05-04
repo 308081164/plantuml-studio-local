@@ -10,11 +10,21 @@ import {
   mkdirSync,
   unlinkSync,
 } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildZhMenu } from './scripts/app-menu.mjs';
+import {
+  generateHwId,
+  generateDeviceCode,
+  validateLicenseCode,
+  readLicense,
+  writeLicense,
+  checkLicenseStatus,
+  getLicensePath,
+  shortHwId,
+} from './scripts/license-common.mjs';
 import {
   buildProjectSummary,
   CHARS_PER_TOKEN_EST,
@@ -50,6 +60,8 @@ const DEFAULT_AGENT = {
   lastProjectRoot: '',
   /** 自定义忽略 glob，一行一条（与 .gitignore 叠加） */
   projectIgnoreGlobs: '',
+  /** 国内高校模式开关（生成符合国内标准的流程图） */
+  chinaUnivMode: false,
 };
 
 function agentConfigPath() {
@@ -74,8 +86,9 @@ function loadAgentConfig() {
         typeof j.projectIgnoreGlobs === 'string'
           ? j.projectIgnoreGlobs
           : Array.isArray(j.projectIgnoreGlobs)
-            ? j.projectIgnoreGlobs.map(String).join('\n')
-            : '',
+          ? j.projectIgnoreGlobs.map(String).join('\n')
+          : '',
+      chinaUnivMode: typeof j.chinaUnivMode ? true : false,
     };
   } catch {
     return { ...DEFAULT_AGENT };
@@ -97,6 +110,7 @@ function saveAgentConfig(partial) {
   if (partial.apiKey !== undefined) next.apiKey = String(partial.apiKey);
   if (partial.lastProjectRoot !== undefined) next.lastProjectRoot = String(partial.lastProjectRoot);
   if (partial.projectIgnoreGlobs !== undefined) next.projectIgnoreGlobs = String(partial.projectIgnoreGlobs);
+  if (partial.chinaUnivMode !== undefined) next.chinaUnivMode = partial.chinaUnivMode ? true : false;
   const dir = dirname(agentConfigPath());
   mkdirSync(dir, { recursive: true });
   writeFileSync(agentConfigPath(), JSON.stringify(next, null, 2), 'utf8');
@@ -126,19 +140,98 @@ function readKnowledgeBaseSnippet(maxChars = 16000) {
   }
 }
 
-function buildAgentSystemPrompt(kbSnippet) {
+function buildAgentSystemPrompt(kbSnippet, cfg) {
   const kb = kbSnippet.trim();
+  const chinaModeExtra = cfg.chinaUnivMode ? `
+===== 【国内高校模式：强制输出规则】 =====
+1️⃣ 第一行必须是：@startuml activity
+   ❌ 错误写法：@startuml（后面不加 activity 会报错）
+   ✅ 正确写法：@startuml activity
+
+2️⃣ 接下来必须是这 3 行 skinparam：
+   skinparam ActivityShape roundedbox
+   skinparam ConditionStyle InsideDiamond
+   skinparam ConditionEndStyle HLine
+
+3️⃣ 开始节点必须是：:开始;
+   ❌ 错误写法：start
+   ✅ 正确写法：:开始;
+
+4️⃣ 结束节点必须是：:结束;
+   ❌ 错误写法：stop
+   ✅ 正确写法：:结束;
+
+5️⃣ 每一步的输出结构（严格按顺序）：
+   @startuml activity
+   title [流程图标题]
+   skinparam ActivityShape roundedbox
+   skinparam ConditionStyle InsideDiamond
+   skinparam ConditionEndStyle HLine
+   skinparam activity {
+     BorderColor black
+     BackgroundColor white
+     ArrowColor black
+   }
+   :开始;
+   [用户需求的流程图内容]
+   :结束;
+   @enduml
+
+6️⃣ 完整示例参考（登录流程）：
+@startuml activity
+title 登录流程图（国内标准写法）
+skinparam ActivityShape roundedbox
+skinparam ConditionStyle InsideDiamond
+skinparam ConditionEndStyle HLine
+skinparam activity {
+  BorderColor black
+  BackgroundColor white
+  ArrowColor black
+}
+:开始;
+:用户打开登录页面;
+:输入用户名和密码;
+:点击登录按钮;
+:系统校验输入是否为空;
+if (用户名或密码为空?) then (是)
+  :提示"用户名或密码不能为空";
+else (否)
+  :系统查询用户信息;
+  if (用户存在?) then (否)
+    :提示"用户不存在";
+  else (是)
+    :校验密码是否正确;
+    if (密码正确?) then (否)
+      :提示"密码错误";
+    else (是)
+      :生成登录令牌(Token);
+      :记录登录日志;
+      :跳转到系统主页;
+      :显示登录成功;
+    endif
+  endif
+endif
+:结束;
+@enduml
+===== 【国内高校模式强制禁止】 =====
+❌ 绝对不允许写 start
+❌ 绝对不允许写 stop
+❌ 绝对不允许 @startuml 后面不加 activity
+===== 【输出要求】 =====
+直接输出 PlantUML 代码即可，不要任何 Markdown 解释或代码块包裹（除非你想，但代码块里的内容必须是完整 PlantUML）。
+` : '';
   return [
     '你是 PlantUML 专家。用户会用自然语言描述要画的图。',
     '你必须只输出一段完整、可渲染的 PlantUML 源码，且必须包含 @startuml 与 @enduml（或当前任务要求的其它 @start...@end 对）。',
     '不要输出 Markdown 解释；若用代码块包裹，块内仍须是完整 PlantUML。',
     '若信息不足，在图内用 note 简要列出假设，仍给出可渲染的一版。',
     kb ? `\n下列为项目知识库摘录，请遵守其中的语法与约束：\n\n${kb}` : '',
+    chinaModeExtra,
   ].join('\n');
 }
 
-function buildAgentSystemPromptForProject(kbSnippet) {
-  return `${buildAgentSystemPrompt(kbSnippet)}\n\n【项目模式】用户会提供本地工程目录的索引与「规划阶段」选出的若干源文件全文（受控长度）。请结合这些内容制图；若仍有信息缺口，在图中用 note 标明假设与未读到的模块。`;
+function buildAgentSystemPromptForProject(kbSnippet, cfg) {
+  return `${buildAgentSystemPrompt(kbSnippet, cfg)}\n\n【项目模式】用户会提供本地工程目录的索引与「规划阶段」选出的若干源文件全文（受控长度）。请结合这些内容制图；若仍有信息缺口，在图中用 note 标明假设与未读到的模块。`;
 }
 
 /** 附在 PlantUML 校验失败后的修正轮 user 消息中，针对高频语法坑（如 title 行内字面 \\n） */
@@ -180,6 +273,58 @@ function extractPlantumlFromModelText(text) {
   }
   if (lastNaked) return lastNaked.trim();
   return text.trim();
+}
+
+/**
+ * 如果开启国内高校模式，自动在 @startuml 后加入必须的配置
+ * 只做完全安全的事情：
+ * 1. 把 @startuml 变成 @startuml activity（关键！）
+ * 2. 插入 skinparam 配置（如果没有的话）
+ * 3. 只替换完整独立的 start/stop（避免误伤）
+ */
+function applyChinaUnivModeIfNeeded(source, cfg) {
+  if (!cfg.chinaUnivMode) return source;
+  
+  let result = source;
+  
+  // 1. 先把 @startuml 变成 @startuml activity（避免报错 "Cannot find if"）
+  result = result.replace(/@startuml(\s*)/i, '@startuml activity$1');
+  
+  // 2. 插入/确保 skinparam 配置存在
+  const chinaUnivHeader = `
+skinparam ActivityShape roundedbox
+skinparam ConditionStyle InsideDiamond
+skinparam ConditionEndStyle HLine
+skinparam activity {
+  BorderColor black
+  BackgroundColor white
+  ArrowColor black
+}
+`.trim();
+  
+  const startMatch = result.match(/(@startuml\s*)/);
+  if (startMatch) {
+    const startIndex = startMatch.index + startMatch[1].length;
+    const before = result.slice(0, startIndex);
+    const after = result.slice(startIndex);
+    
+    if (!after.includes('skinparam ActivityShape roundedbox')) {
+      result = `${before}\n${chinaUnivHeader}\n${after}`;
+    }
+  }
+  
+  // 3. 安全替换独立的 start → :开始;（完全匹配、只替换独立单词）
+  // 避免误伤其他可能包含 "start" 的内容
+  result = result.replace(/^\s*start\s*$/gm, ':开始;');
+  result = result.replace(/^\s*Start\s*$/gm, ':开始;');
+  result = result.replace(/^\s*START\s*$/gm, ':开始;');
+  
+  // 4. 安全替换独立的 stop → :结束;（完全匹配、只替换独立单词）
+  result = result.replace(/^\s*stop\s*$/gm, ':结束;');
+  result = result.replace(/^\s*Stop\s*$/gm, ':结束;');
+  result = result.replace(/^\s*STOP\s*$/gm, ':结束;');
+  
+  return result;
 }
 
 async function plantumlRenderCheck(source, options = ['-tpng']) {
@@ -247,7 +392,7 @@ async function runAgentPipeline(userText) {
   const cfg = loadAgentConfig();
   const logs = [];
   const kb = readKnowledgeBaseSnippet();
-  const system = buildAgentSystemPrompt(kb);
+  const system = buildAgentSystemPrompt(kb, cfg);
   const maxExtra = cfg.maxRetries;
   const maxRounds = 1 + maxExtra;
 
@@ -272,7 +417,8 @@ async function runAgentPipeline(userText) {
       [{ role: 'system', content: system }, { role: 'user', content: userContent }],
       { temperature: round > 0 ? 0.58 : 0.2 }
     );
-    const extracted = extractPlantumlFromModelText(raw);
+    let extracted = extractPlantumlFromModelText(raw);
+    extracted = applyChinaUnivModeIfNeeded(extracted, cfg);
     if (round > 0 && extracted === lastExtracted && lastExtracted.length > 20) {
       noRepeatHint = true;
       logs.push(`第 ${round + 1} 轮：提取结果与上一轮完全相同（${extracted.length} 字符），下一轮将加重「禁止重复」提示并提高采样温度。`);
@@ -394,7 +540,7 @@ async function runAgentPipelineWithProject(userText, projectRoot, ignoreGlobsTex
   );
 
   const kb = readKnowledgeBaseSnippet();
-  const system = buildAgentSystemPromptForProject(kb);
+  const system = buildAgentSystemPromptForProject(kb, cfg);
   const maxExtra = cfg.maxRetries;
   const maxRounds = 1 + maxExtra;
 
@@ -419,7 +565,8 @@ async function runAgentPipelineWithProject(userText, projectRoot, ignoreGlobsTex
       [{ role: 'system', content: system }, { role: 'user', content: userContent }],
       { temperature: round > 0 ? 0.58 : 0.2 }
     );
-    const extracted = extractPlantumlFromModelText(raw);
+    let extracted = extractPlantumlFromModelText(raw);
+    extracted = applyChinaUnivModeIfNeeded(extracted, cfg);
     if (round > 0 && extracted === lastExtracted && lastExtracted.length > 20) {
       noRepeatHint = true;
       logs.push(`第 ${round + 1} 轮：提取结果与上一轮完全相同（${extracted.length} 字符），下一轮将加重「禁止重复」提示并提高采样温度。`);
@@ -993,6 +1140,127 @@ function registerIpcHandlers() {
       const svgText = readFileSync(sp, 'utf8');
       clipboard.writeText(svgText);
       return { ok: true, mode: 'svg' };
+    } catch (e) {
+      return { ok: false, error: String(e.message || e) };
+    }
+  });
+
+  /* ---------- 授权与激活 ---------- */
+
+  /**
+   * 收集本机设备信息用于生成 HW_ID
+   */
+  function collectDeviceInfo() {
+    const info = {};
+    try {
+      // Windows MachineGuid
+      const { execSync } = require('node:child_process');
+      try {
+        const regOut = execSync(
+          'reg query "HKLM\\SOFTWARE\\Microsoft\\Cryptography" /v MachineGuid',
+          { timeout: 3000, encoding: 'utf8', windowsHide: true }
+        );
+        const m = regOut.match(/MachineGuid\s+REG_SZ\s+(\S+)/i);
+        if (m) info.machineGuid = m[1].trim();
+      } catch { /* ignore */ }
+
+      // 系统盘卷序列号
+      try {
+        const volOut = execSync('vol C:', { timeout: 2000, encoding: 'utf8', windowsHide: true });
+        const m = volOut.match(/序列号\s+(\S+)/i) || volOut.match(/Serial Number\s+(\S+)/i);
+        if (m) info.diskSerial = m[1].trim();
+      } catch { /* ignore */ }
+
+      // 稳定网卡 MAC（排除虚拟适配器）
+      try {
+        const macOut = execSync(
+          'wmic nic where "NetEnabled=true and AdapterTypeId=0 and not Name like \'%%Virtual%%\' and not Name like \'%%VMware%%\' and not Name like \'%%Hyper-V%%\'" get MACAddress',
+          { timeout: 3000, encoding: 'utf8', windowsHide: true }
+        );
+        const lines = macOut.split('\n').map(l => l.trim()).filter(l => l && !l.includes('MACAddress'));
+        if (lines.length > 0) info.macAddress = lines[0];
+      } catch { /* ignore */ }
+    } catch { /* ignore */ }
+    return info;
+  }
+
+  ipcMain.handle('studio:license-get-device-info', () => {
+    try {
+      const devInfo = collectDeviceInfo();
+      const hwId = generateHwId(devInfo);
+      const deviceCode = generateDeviceCode(hwId);
+      return {
+        ok: true,
+        hwId,
+        shortHwId: shortHwId(hwId),
+        deviceCode,
+        collected: devInfo,
+      };
+    } catch (e) {
+      return { ok: false, error: String(e.message || e) };
+    }
+  });
+
+  ipcMain.handle('studio:license-get-status', () => {
+    try {
+      const status = checkLicenseStatus(app.getPath('userData'));
+      return { ok: true, ...status };
+    } catch (e) {
+      return { ok: false, error: String(e.message || e) };
+    }
+  });
+
+  ipcMain.handle('studio:license-activate', (_e, { licenseCode }) => {
+    try {
+      const code = String(licenseCode || '').trim();
+      if (!code) return { ok: false, error: '请输入软件激活码' };
+
+      // 获取本机 HW_ID
+      const devInfo = collectDeviceInfo();
+      const hwId = generateHwId(devInfo);
+
+      // 获取公钥（从环境变量或内置）
+      const pubKeyHex = process.env.UML_MASTER_PUBKEY || '';
+      let publicKey = null;
+      if (pubKeyHex) {
+        try {
+          publicKey = Buffer.from(pubKeyHex, 'hex');
+        } catch {
+          return { ok: false, error: '内置公钥配置异常，请联系管理员' };
+        }
+      }
+
+      // 校验激活码
+      const result = validateLicenseCode(code, hwId, publicKey);
+      if (!result.ok) {
+        return { ok: false, error: result.error };
+      }
+
+      // 持久化存储许可证
+      const licenseData = {
+        ...result.payload,
+        activated_at: new Date().toISOString(),
+        license_code_prefix: code.slice(0, 20) + '…',
+      };
+      writeLicense(app.getPath('userData'), licenseData);
+
+      return {
+        ok: true,
+        licenseMode: result.licenseMode,
+        payload: result.payload,
+      };
+    } catch (e) {
+      return { ok: false, error: String(e.message || e) };
+    }
+  });
+
+  ipcMain.handle('studio:license-deactivate', () => {
+    try {
+      const p = getLicensePath(app.getPath('userData'));
+      if (existsSync(p)) {
+        writeFileSync(p, JSON.stringify({ deactivated: true, deactivated_at: new Date().toISOString() }, null, 2), 'utf8');
+      }
+      return { ok: true };
     } catch (e) {
       return { ok: false, error: String(e.message || e) };
     }

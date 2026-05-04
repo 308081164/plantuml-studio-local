@@ -1,7 +1,7 @@
 {
   "name": "plantuml-studio-local",
-  "version": "2.0.0-beta.3",
-  "description": "本地 PlantUML 编辑预览（PicoWeb + Electron，M3 Beta：项目目录驱动制图）",
+  "version": "2.0.0-beta.9",
+  "description": "本地 PlantUML 编辑预览（PicoWeb + Electron，M3 Beta：国内高校模式提示词优化）",
   "main": "electron-main.mjs",
   "type": "module",
   "author": "",
@@ -27,6 +27,7 @@
       "preload.cjs",
       "renderer/**/*",
       "scripts/app-menu.mjs",
+      "scripts/license-common.mjs",
       "scripts/project-index.mjs",
       "scripts/project-context.mjs",
       "assets/app-logo-512.png"

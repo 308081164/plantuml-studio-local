@@ -32,6 +32,11 @@ export function buildZhMenu() {
       label: '文件',
       submenu: [
         {
+          label: '授权激活',
+          click: () => sendToRenderer('studio:menu-license'),
+        },
+        { type: 'separator' },
+        {
           label: '查看本次执行日志',
           click: () => sendToRenderer('studio:menu-session-log'),
         },

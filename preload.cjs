@@ -16,6 +16,11 @@ ipcRenderer.on('studio:menu-error-log', () => {
   if (menuErrorLogHandler) menuErrorLogHandler();
 });
 
+let menuLicenseHandler = null;
+ipcRenderer.on('studio:menu-license', () => {
+  if (menuLicenseHandler) menuLicenseHandler();
+});
+
 function base64ToArrayBuffer(b64) {
   const binary = atob(b64);
   const len = binary.length;
@@ -64,6 +69,12 @@ contextBridge.exposeInMainWorld('studio', {
       menuErrorLogHandler = null;
     };
   },
+  onMenuLicense: (cb) => {
+    menuLicenseHandler = typeof cb === 'function' ? cb : null;
+    return () => {
+      menuLicenseHandler = null;
+    };
+  },
   errorArchiveAppend: (payload) => ipcRenderer.invoke('studio:error-archive-append', payload),
   errorArchiveRead: () => ipcRenderer.invoke('studio:error-archive-read'),
   stashList: () => ipcRenderer.invoke('studio:stash-list'),
@@ -71,4 +82,9 @@ contextBridge.exposeInMainWorld('studio', {
   stashRemove: (ids) => ipcRenderer.invoke('studio:stash-remove', { ids }),
   stashGetFull: (id) => ipcRenderer.invoke('studio:stash-get-full', { id }),
   stashCopy: (id) => ipcRenderer.invoke('studio:stash-copy', { id }),
+  /* ---------- 授权与激活 ---------- */
+  licenseGetDeviceInfo: () => ipcRenderer.invoke('studio:license-get-device-info'),
+  licenseGetStatus: () => ipcRenderer.invoke('studio:license-get-status'),
+  licenseActivate: (licenseCode) => ipcRenderer.invoke('studio:license-activate', { licenseCode }),
+  licenseDeactivate: () => ipcRenderer.invoke('studio:license-deactivate'),
 });

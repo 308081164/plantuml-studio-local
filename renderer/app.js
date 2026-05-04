@@ -5,10 +5,49 @@ Bob --> Alice : OK
 @enduml
 `;
 
+const CHINA_UNIV_DEFAULT_SOURCE = `@startuml activity
+' 关键：@startuml 后面必须加 "activity"，否则会报错!
+title 二次方程求根流程图（国内标准写法）
+skinparam ActivityShape roundedbox
+skinparam ConditionStyle InsideDiamond
+skinparam ConditionEndStyle HLine
+skinparam activity {
+  BorderColor black
+  BackgroundColor white
+  ArrowColor black
+}
+
+:开始;
+
+:输入系数a,b,c的值;
+
+if (|a| <= 10^-6?) then (Y)
+  :提示"不是二次方程";
+else (N)
+  :disc = b^2 - 4ac;
+  if (disc <= 10^-6?) then (Y)
+    :输出两个相等实根p;
+  else (N)
+    if (disc > 0?) then (Y)
+      :输出两个不等实根p±q;
+    else (N)
+      :输出两个共轭复根p±qi;
+    endif
+  endif
+endif
+
+:结束;
+
+@enduml
+`;
+
 const $ = (id) => document.getElementById(id);
 
 /** 当前选择的项目根目录（与主进程配置 lastProjectRoot 同步） */
 let selectedProjectRoot = '';
+
+/** 国内高校模式开关 */
+let isChinaUnivMode = false;
 
 /** 最近一轮智能生成 / 项目制图的进程日志（供「文件 → 查看本次执行日志」） */
 let lastSessionExecutionLog = '';
@@ -76,11 +115,61 @@ async function getBase() {
   return base;
 }
 
+/**
+ * 如果开启国内高校模式，应用相应的转换
+ */
+function applyChinaUnivModeIfNeeded(source) {
+  if (!isChinaUnivMode) return source;
+  
+  let result = source;
+  
+  // 1. 把 @startuml 变成 @startuml activity（避免报错 "Cannot find if"）
+  if (!result.includes('@startuml activity')) {
+    result = result.replace(/@startuml(\s*)/i, '@startuml activity$1');
+  }
+  
+  // 2. 插入必要的 skinparam 配置
+  const chinaUnivHeader = `
+skinparam ActivityShape roundedbox
+skinparam ConditionStyle InsideDiamond
+skinparam ConditionEndStyle HLine
+skinparam activity {
+  BorderColor black
+  BackgroundColor white
+  ArrowColor black
+}
+`.trim();
+  
+  const startMatch = result.match(/(@startuml\s*)/);
+  if (startMatch) {
+    const startIndex = startMatch.index + startMatch[1].length;
+    const before = result.slice(0, startIndex);
+    const after = result.slice(startIndex);
+    
+    if (!after.includes('skinparam ActivityShape roundedbox')) {
+      result = `${before}\n${chinaUnivHeader}\n${after}`;
+    }
+  }
+  
+  // 3. 安全替换独立的 start/stop
+  result = result.replace(/^\s*start\s*$/gm, ':开始;');
+  result = result.replace(/^\s*Start\s*$/gm, ':开始;');
+  result = result.replace(/^\s*START\s*$/gm, ':开始;');
+  result = result.replace(/^\s*stop\s*$/gm, ':结束;');
+  result = result.replace(/^\s*Stop\s*$/gm, ':结束;');
+  result = result.replace(/^\s*STOP\s*$/gm, ':结束;');
+  
+  return result;
+}
+
 async function render() {
-  const source = $('source').value;
+  let source = $('source').value;
   const fmt = $('format').value;
   showErrors([]);
   setStatus('渲染中…', null);
+
+  // 应用国内高校模式转换
+  source = applyChinaUnivModeIfNeeded(source);
 
   try {
     const base = await getBase();
@@ -138,9 +227,13 @@ async function render() {
 }
 
 async function exportFile() {
-  const source = $('source').value;
+  let source = $('source').value;
   const fmt = $('format').value;
   setStatus('导出中…', null);
+  
+  // 应用国内高校模式转换
+  source = applyChinaUnivModeIfNeeded(source);
+  
   try {
     const base = await getBase();
     const res = await fetch(`${base}/render`, {
@@ -501,6 +594,14 @@ async function loadAgentForm() {
     selectedProjectRoot = String(c.lastProjectRoot || '').trim();
     const pr = $('project-root-display');
     if (pr) pr.value = selectedProjectRoot;
+    // 加载国内高校模式状态
+    isChinaUnivMode = Boolean(c.chinaUnivMode);
+    const modeCb = $('china-univ-mode');
+    if (modeCb) modeCb.checked = isChinaUnivMode;
+    // 如果是国内高校模式，并且源码还是默认示例，就换成国内高校的示例
+    if (isChinaUnivMode && $('source').value === DEFAULT_SOURCE) {
+      $('source').value = CHINA_UNIV_DEFAULT_SOURCE;
+    }
     applyInitialAgentLayoutFromConfig();
   } catch {
     /* ignore */
@@ -525,6 +626,7 @@ async function saveAgentForm() {
       model: $('cfg-model').value,
       maxRetries: Number($('cfg-max-retries').value),
       projectIgnoreGlobs: projectIgnoreGlobsValue(),
+      chinaUnivMode: isChinaUnivMode,
     });
     const nowKey = $('cfg-api-key').value.trim();
     const bar = $('agent-compact-bar');
@@ -543,6 +645,19 @@ async function saveAgentForm() {
   } catch (e) {
     setStatus(String(e.message || e), false);
   }
+}
+
+function onChinaUnivModeToggle() {
+  isChinaUnivMode = $('china-univ-mode').checked;
+  // 自动保存配置
+  if (window.studio?.setAgentConfig) {
+    window.studio.setAgentConfig({ chinaUnivMode: isChinaUnivMode }).catch(() => {});
+  }
+  // 如果开启国内高校模式，并且当前源码是默认示例，就换成国内高校的示例
+  if (isChinaUnivMode && $('source').value === DEFAULT_SOURCE) {
+    $('source').value = CHINA_UNIV_DEFAULT_SOURCE;
+  }
+  setStatus(isChinaUnivMode ? '国内高校模式已开启' : '国内高校模式已关闭', true);
 }
 
 async function applyAgentRunResult(r) {
@@ -740,6 +855,10 @@ function wireAgentExpandAdvanced(elId) {
 }
 
 function init() {
+  // 国内高校模式开关监听
+  $('china-univ-mode')?.addEventListener('change', () => onChinaUnivModeToggle());
+  
+  // 默认源码加载 - 先加载默认，再在 loadAgentForm 时根据模式替换
   $('source').value = DEFAULT_SOURCE;
   $('btn-render').addEventListener('click', () => render());
   $('btn-export').addEventListener('click', () => exportFile());
@@ -812,9 +931,165 @@ function init() {
   loadAgentForm();
   refreshStashList().catch(() => {});
 
+  /* ---------- 授权激活 ---------- */
+  wireLicenseDialog();
+
   getBase()
     .then((b) => setStatus(`已连接 ${b}`, true))
     .catch((e) => setStatus(String(e.message || e), false));
+}
+
+/* ============================================================
+ * 授权激活对话框逻辑
+ * ============================================================ */
+
+async function refreshLicenseStatus() {
+  if (!window.studio?.licenseGetStatus) return;
+  const icon = $('license-status-icon');
+  const text = $('license-status-text');
+  const deviceArea = $('license-device-area');
+  const activateArea = $('license-activate-area');
+
+  try {
+    const status = await window.studio.licenseGetStatus();
+    if (status.activated) {
+      icon.textContent = '✅';
+      const mode = status.licenseMode === 'permanent' ? '永久授权' : '限时授权';
+      const tier = status.payload?.tier || 'full';
+      text.textContent = `已激活（${mode}，等级: ${tier}）`;
+      if (status.payload?.valid_until) {
+        text.textContent += `，有效期至 ${status.payload.valid_until}`;
+      }
+      deviceArea.classList.add('hidden');
+      activateArea.classList.remove('hidden');
+      $('license-code-input').value = '';
+      $('license-activate-result').classList.add('hidden');
+    } else {
+      icon.textContent = '🔒';
+      text.textContent = status.error || '未激活';
+      deviceArea.classList.remove('hidden');
+      activateArea.classList.remove('hidden');
+      // 加载设备信息
+      await refreshDeviceInfo();
+    }
+  } catch (e) {
+    icon.textContent = '❌';
+    text.textContent = `检查授权状态失败: ${e.message}`;
+  }
+}
+
+async function refreshDeviceInfo() {
+  if (!window.studio?.licenseGetDeviceInfo) return;
+  try {
+    const info = await window.studio.licenseGetDeviceInfo();
+    if (info.ok) {
+      $('license-hw-id').textContent = info.shortHwId;
+      $('license-device-code').textContent = info.deviceCode;
+    } else {
+      $('license-hw-id').textContent = '获取失败';
+      $('license-device-code').textContent = '获取失败';
+    }
+  } catch (e) {
+    $('license-hw-id').textContent = '异常';
+    $('license-device-code').textContent = '异常';
+  }
+}
+
+async function handleLicenseActivate() {
+  if (!window.studio?.licenseActivate) return;
+  const code = $('license-code-input').value.trim();
+  if (!code) {
+    setStatus('请输入软件激活码', false);
+    return;
+  }
+
+  const resultEl = $('license-activate-result');
+  resultEl.classList.remove('hidden');
+  resultEl.textContent = '正在验证激活码…';
+  resultEl.style.color = 'var(--muted)';
+
+  try {
+    const r = await window.studio.licenseActivate(code);
+    if (r.ok) {
+      resultEl.textContent = '✅ 激活成功！';
+      resultEl.style.color = 'var(--ok)';
+      setStatus('授权激活成功', true);
+      await refreshLicenseStatus();
+    } else {
+      resultEl.textContent = `❌ 激活失败: ${r.error}`;
+      resultEl.style.color = 'var(--error)';
+      setStatus('激活失败', false);
+    }
+  } catch (e) {
+    resultEl.textContent = `❌ 激活异常: ${e.message}`;
+    resultEl.style.color = 'var(--error)';
+    setStatus('激活异常', false);
+  }
+}
+
+async function handleLicenseDeactivate() {
+  if (!window.studio?.licenseDeactivate) return;
+  if (!confirm('确定卸载激活？卸载后需要重新输入激活码才能使用完整功能。')) return;
+
+  try {
+    const r = await window.studio.licenseDeactivate();
+    if (r.ok) {
+      setStatus('已卸载激活', true);
+      await refreshLicenseStatus();
+    } else {
+      setStatus(`卸载失败: ${r.error}`, false);
+    }
+  } catch (e) {
+    setStatus(`卸载异常: ${e.message}`, false);
+  }
+}
+
+function wireLicenseDialog() {
+  const dlg = $('license-dialog');
+  if (!dlg) return;
+
+  // 关闭按钮
+  $('license-dialog-close').addEventListener('click', () => dlg.close());
+  dlg.addEventListener('click', (ev) => {
+    if (ev.target === dlg) dlg.close();
+  });
+
+  // 复制激活设备码
+  $('btn-license-copy-device-code').addEventListener('click', async () => {
+    const code = $('license-device-code').textContent;
+    if (code && code !== '获取失败') {
+      try {
+        await navigator.clipboard.writeText(code);
+        setStatus('已复制激活设备码', true);
+      } catch {
+        setStatus('复制失败', false);
+      }
+    }
+  });
+
+  // 激活按钮
+  $('btn-license-activate').addEventListener('click', () => handleLicenseActivate());
+
+  // 卸载激活按钮
+  $('btn-license-deactivate').addEventListener('click', () => handleLicenseDeactivate());
+
+  // 打开对话框时刷新状态
+  dlg.addEventListener('open', () => {
+    // dialog 没有 open 事件，用 before-show 模拟
+  });
+
+  // 暴露打开方法到全局（供菜单调用）
+  window.openLicenseDialog = async () => {
+    await refreshLicenseStatus();
+    if (typeof dlg.showModal === 'function') dlg.showModal();
+  };
+
+  // 在菜单中注册
+  if (window.studio?.onMenuLicense) {
+    window.studio.onMenuLicense(() => {
+      window.openLicenseDialog();
+    });
+  }
 }
 
 init();

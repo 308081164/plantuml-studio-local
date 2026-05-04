@@ -1,0 +1,17 @@
+{
+  "name": "uml-master-admin-tool",
+  "version": "1.0.0",
+  "description": "UML 大师 - 管理员激活码生成工具",
+  "main": "admin-cli.mjs",
+  "type": "module",
+  "author": "",
+  "license": "GPL-3.0",
+  "bin": {
+    "uml-admin": "./admin-cli.mjs"
+  },
+  "scripts": {
+    "start": "node admin-cli.mjs",
+    "init-keys": "node admin-cli.mjs init-keys",
+    "generate": "node admin-cli.mjs generate"
+  }
+}
