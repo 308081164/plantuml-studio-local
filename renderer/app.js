@@ -5,6 +5,39 @@ Bob --> Alice : OK
 @enduml
 `;
 
+const CHEN_ER_DEFAULT_SOURCE = `@startchen "学生选课系统 ER 图（陈氏表示法）"
+left to right direction
+
+skinparam defaultFontSize 24
+
+<style>
+chenEntity {
+  BackGroundColor white
+  BorderColor black
+  FontSize 24
+}
+chenRelationship {
+  BackGroundColor white
+  BorderColor black
+  FontSize 24
+}
+</style>
+
+entity "学生" as Student { }
+entity "课程" as Course { }
+entity "教师" as Teacher { }
+
+relationship "选修" as Enroll { }
+relationship "讲授" as Teach { }
+
+Student -N- Enroll
+Enroll -N- Course
+
+Teacher -1- Teach
+Teach -N- Course
+@endchen
+`;
+
 const CHINA_UNIV_DEFAULT_SOURCE = `@startuml activity
 ' 关键：@startuml 后面必须加 "activity"，否则会报错!
 title 二次方程求根流程图（国内标准写法）
@@ -51,6 +84,15 @@ let isChinaUnivMode = false;
 
 /** 最近一轮智能生成 / 项目制图的进程日志（供「文件 → 查看本次执行日志」） */
 let lastSessionExecutionLog = '';
+
+/** 暂存区文件夹数据 */
+let stashFolders = [];
+
+/** SVG 编辑器实例 */
+let svgEditor = null;
+
+/** 是否处于画板编辑模式 */
+let isInEditMode = false;
 
 function projectIgnoreGlobsValue() {
   const el = $('cfg-project-ignore-globs');
@@ -117,18 +159,21 @@ async function getBase() {
 
 /**
  * 如果开启国内高校模式，应用相应的转换
+ * 注意：@startchen 语法不需要转换，保持原样
  */
 function applyChinaUnivModeIfNeeded(source) {
   if (!isChinaUnivMode) return source;
   
+  if (source.includes('@startchen')) {
+    return source;
+  }
+  
   let result = source;
   
-  // 1. 把 @startuml 变成 @startuml activity（避免报错 "Cannot find if"）
   if (!result.includes('@startuml activity')) {
     result = result.replace(/@startuml(\s*)/i, '@startuml activity$1');
   }
   
-  // 2. 插入必要的 skinparam 配置
   const chinaUnivHeader = `
 skinparam ActivityShape roundedbox
 skinparam ConditionStyle InsideDiamond
@@ -151,7 +196,6 @@ skinparam activity {
     }
   }
   
-  // 3. 安全替换独立的 start/stop
   result = result.replace(/^\s*start\s*$/gm, ':开始;');
   result = result.replace(/^\s*Start\s*$/gm, ':开始;');
   result = result.replace(/^\s*START\s*$/gm, ':开始;');
@@ -168,7 +212,6 @@ async function render() {
   showErrors([]);
   setStatus('渲染中…', null);
 
-  // 应用国内高校模式转换
   source = applyChinaUnivModeIfNeeded(source);
 
   try {
@@ -231,7 +274,6 @@ async function exportFile() {
   const fmt = $('format').value;
   setStatus('导出中…', null);
   
-  // 应用国内高校模式转换
   source = applyChinaUnivModeIfNeeded(source);
   
   try {
@@ -260,10 +302,10 @@ async function exportFile() {
 
 function previewHasContent() {
   const ph = $('preview-placeholder');
-  if (!ph.classList.contains('hidden')) return false;
+  if (!ph || !ph.classList.contains('hidden')) return false;
   const imgEl = $('preview-img');
   const svgWrap = $('preview-svg');
-  return !imgEl.classList.contains('hidden') || !svgWrap.classList.contains('hidden');
+  return imgEl && svgWrap && (!imgEl.classList.contains('hidden') || !svgWrap.classList.contains('hidden'));
 }
 
 /** 将当前预览以 PNG 写入系统剪贴板（SVG 预览时按当前源码重新渲染 PNG） */
@@ -326,32 +368,72 @@ function wirePreviewContextMenu() {
   });
 }
 
-async function addCurrentToStash() {
-  if (!window.studio?.stashAdd) return;
-  const source = $('source').value;
+function openStashAddDialog() {
+  const dlg = $('stash-add-dialog');
+  const nameInput = $('stash-add-name');
+  const folderSelect = $('stash-add-folder');
+  
+  nameInput.value = '';
+  folderSelect.innerHTML = '<option value="">暂存区根目录</option>';
+  
+  stashFolders.forEach(folder => {
+    const option = document.createElement('option');
+    option.value = folder.id;
+    option.textContent = folder.name;
+    folderSelect.appendChild(option);
+  });
+  
+  dlg.showModal();
+}
+
+async function addCurrentToStashWithFolder() {
+  const dlg = $('stash-add-dialog');
+  const name = $('stash-add-name').value.trim();
+  const folderId = $('stash-add-folder').value;
+  
+  dlg.close();
+  
   if (!previewHasContent()) {
     setStatus('请先渲染预览再加入暂存区', false);
     return;
   }
+  
   setStatus('正在写入暂存区…', null);
+  
   try {
+    const source = $('source').value;
     const imgEl = $('preview-img');
     const svgWrap = $('preview-svg');
     let r;
+    
     if (!imgEl.classList.contains('hidden') && imgEl.src) {
       const buf = await (await fetch(imgEl.src)).arrayBuffer();
-      r = await window.studio.stashAdd({ kind: 'png', arrayBuffer: buf, sourceText: source });
+      r = await window.studio.stashAdd({ 
+        kind: 'png', 
+        arrayBuffer: buf, 
+        sourceText: source,
+        label: name || undefined,
+        folderId: folderId || undefined
+      });
     } else if (!svgWrap.classList.contains('hidden')) {
       const svgText = svgWrap.innerHTML;
-      r = await window.studio.stashAdd({ kind: 'svg', svgText, sourceText: source });
+      r = await window.studio.stashAdd({ 
+        kind: 'svg', 
+        svgText, 
+        sourceText: source,
+        label: name || undefined,
+        folderId: folderId || undefined
+      });
     } else {
       setStatus('没有可暂存的预览', false);
       return;
     }
+    
     if (!r?.ok) {
       setStatus(r?.error || '暂存失败', false);
       return;
     }
+    
     setStatus('已加入暂存区', true);
     await refreshStashList();
   } catch (e) {
@@ -363,76 +445,146 @@ async function refreshStashList() {
   if (!window.studio?.stashList) return;
   const r = await window.studio.stashList();
   const items = r.items || [];
+  stashFolders = r.folders || [];
+  
   $('stash-count').textContent = `${items.length} 项`;
-  const grid = $('stash-grid');
+  const tree = $('stash-tree');
   const empty = $('stash-empty');
-  if (!items.length) {
+  
+  if (!items.length && !stashFolders.length) {
     empty.classList.remove('hidden');
-    grid.classList.add('hidden');
-    grid.innerHTML = '';
+    tree.classList.add('hidden');
+    tree.innerHTML = '';
     return;
   }
+  
   empty.classList.add('hidden');
-  grid.classList.remove('hidden');
-  grid.innerHTML = '';
-  for (const it of items) {
-    const card = document.createElement('div');
-    card.className = 'stash-card';
-    card.dataset.id = it.id;
-
-    const lab = document.createElement('label');
-    lab.className = 'stash-card-check';
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.className = 'stash-item-cb';
-    cb.setAttribute('aria-label', '选择');
-    lab.appendChild(cb);
-    card.appendChild(lab);
-
-    const visualEl = document.createElement('div');
-    visualEl.className = 'stash-card-visual';
-    if (it.previewDataUrl) {
-      const im = document.createElement('img');
-      im.className = 'stash-thumb';
-      im.alt = '';
-      im.src = it.previewDataUrl;
-      im.addEventListener('click', () => openStashView(it.id));
-      visualEl.appendChild(im);
-    } else {
-      const ph = document.createElement('div');
-      ph.className = 'stash-thumb-ph';
-      ph.textContent = it.kind === 'svg' ? 'SVG' : 'PNG';
-      visualEl.appendChild(ph);
-    }
-    card.appendChild(visualEl);
-
-    const info = document.createElement('div');
-    info.className = 'stash-card-info';
-    const labEl = document.createElement('div');
-    labEl.className = 'stash-card-label';
-    labEl.textContent = it.label || it.id;
-    const kindEl = document.createElement('div');
-    kindEl.className = 'stash-card-kind';
-    kindEl.textContent = `${String(it.kind || '').toUpperCase()}${it.hasPuml ? ' · 含 PlantUML 源码快照' : ''}`;
-    info.appendChild(labEl);
-    info.appendChild(kindEl);
-    card.appendChild(info);
-
-    const actions = document.createElement('div');
-    actions.className = 'stash-card-actions';
-    ['查看', '复制', '删除'].forEach((t, i) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.textContent = t;
-      if (i === 0) b.className = 'stash-act-view';
-      if (i === 1) b.className = 'stash-act-copy';
-      if (i === 2) b.className = 'stash-act-del';
-      actions.appendChild(b);
+  tree.classList.remove('hidden');
+  tree.innerHTML = '';
+  
+  stashFolders.forEach(folder => {
+    const folderEl = document.createElement('div');
+    folderEl.className = 'stash-folder';
+    folderEl.dataset.id = folder.id;
+    
+    const icon = document.createElement('svg');
+    icon.className = 'stash-folder-icon';
+    icon.setAttribute('viewBox', '0 0 24 24');
+    icon.innerHTML = '<path fill="currentColor" d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>';
+    
+    const name = document.createElement('span');
+    name.className = 'stash-folder-name';
+    name.textContent = folder.name;
+    
+    const count = document.createElement('span');
+    count.className = 'stash-folder-count';
+    const folderItems = items.filter(i => i.folderId === folder.id);
+    count.textContent = `${folderItems.length} 项`;
+    
+    folderEl.appendChild(icon);
+    folderEl.appendChild(name);
+    folderEl.appendChild(count);
+    
+    folderEl.addEventListener('click', () => {
+      showStashFolderContent(folder.id);
     });
-    card.appendChild(actions);
+    
+    tree.appendChild(folderEl);
+  });
+  
+  const grid = document.createElement('div');
+  grid.className = 'stash-grid';
+  
+  const rootItems = items.filter(i => !i.folderId);
+  
+  rootItems.forEach(it => {
+    grid.appendChild(createStashCard(it));
+  });
+  
+  tree.appendChild(grid);
+}
 
-    grid.appendChild(card);
+function createStashCard(it) {
+  const card = document.createElement('div');
+  card.className = 'stash-card';
+  card.dataset.id = it.id;
+
+  const lab = document.createElement('label');
+  lab.className = 'stash-card-check';
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.className = 'stash-item-cb';
+  cb.setAttribute('aria-label', '选择');
+  lab.appendChild(cb);
+  card.appendChild(lab);
+
+  const visualEl = document.createElement('div');
+  visualEl.className = 'stash-card-visual';
+  if (it.previewDataUrl) {
+    const im = document.createElement('img');
+    im.className = 'stash-thumb';
+    im.alt = '';
+    im.src = it.previewDataUrl;
+    im.addEventListener('click', () => openStashView(it.id));
+    visualEl.appendChild(im);
+  } else {
+    const ph = document.createElement('div');
+    ph.className = 'stash-thumb-ph';
+    ph.textContent = it.kind === 'svg' ? 'SVG' : 'PNG';
+    visualEl.appendChild(ph);
   }
+  card.appendChild(visualEl);
+
+  const info = document.createElement('div');
+  info.className = 'stash-card-info';
+  const labEl = document.createElement('div');
+  labEl.className = 'stash-card-label';
+  labEl.textContent = it.label || it.id;
+  const kindEl = document.createElement('div');
+  kindEl.className = 'stash-card-kind';
+  kindEl.textContent = `${String(it.kind || '').toUpperCase()}${it.hasPuml ? ' · 含 PlantUML 源码快照' : ''}`;
+  info.appendChild(labEl);
+  info.appendChild(kindEl);
+  card.appendChild(info);
+
+  const actions = document.createElement('div');
+  actions.className = 'stash-card-actions';
+  ['查看', '复制源码', '删除'].forEach((t, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = t;
+    if (i === 0) b.className = 'stash-act-view';
+    if (i === 1) b.className = 'stash-act-copy';
+    if (i === 2) b.className = 'stash-act-del';
+    actions.appendChild(b);
+  });
+  card.appendChild(actions);
+
+  return card;
+}
+
+function showStashFolderContent(folderId) {
+  const tree = $('stash-tree');
+  tree.innerHTML = '';
+  
+  const backBtn = document.createElement('button');
+  backBtn.type = 'button';
+  backBtn.textContent = '← 返回根目录';
+  backBtn.addEventListener('click', () => refreshStashList());
+  tree.appendChild(backBtn);
+  
+  const grid = document.createElement('div');
+  grid.className = 'stash-grid';
+  
+  if (!window.studio?.stashList) return;
+  
+  window.studio.stashList().then(r => {
+    const items = (r.items || []).filter(i => i.folderId === folderId);
+    items.forEach(it => {
+      grid.appendChild(createStashCard(it));
+    });
+    tree.appendChild(grid);
+  });
 }
 
 async function openStashView(id) {
@@ -447,6 +599,7 @@ async function openStashView(id) {
   const title = $('stash-dialog-title');
   title.textContent = r.label || '查看产出';
   content.innerHTML = '';
+  
   if (r.kind === 'png') {
     const im = document.createElement('img');
     im.className = 'stash-dialog-img';
@@ -459,17 +612,160 @@ async function openStashView(id) {
     wrap.innerHTML = r.svgText;
     content.appendChild(wrap);
   }
+  
+  if (r.sourceText) {
+    const sourceLabel = document.createElement('div');
+    sourceLabel.style.marginTop = '1rem';
+    sourceLabel.style.fontSize = '0.75rem';
+    sourceLabel.style.color = 'var(--muted)';
+    sourceLabel.textContent = 'PlantUML 源码：';
+    content.appendChild(sourceLabel);
+    
+    const sourcePre = document.createElement('pre');
+    sourcePre.style.margin = '0.5rem 0';
+    sourcePre.style.padding = '0.5rem';
+    sourcePre.style.background = 'var(--editor-bg)';
+    sourcePre.style.borderRadius = '6px';
+    sourcePre.style.fontSize = '0.75rem';
+    sourcePre.style.maxHeight = '300px';
+    sourcePre.style.overflow = 'auto';
+    sourcePre.textContent = r.sourceText;
+    content.appendChild(sourcePre);
+  }
+  
   if (typeof dlg.showModal === 'function') dlg.showModal();
 }
 
-async function copyStashItem(id) {
-  if (!window.studio?.stashCopy) return;
-  const r = await window.studio.stashCopy(id);
-  if (!r?.ok) {
-    setStatus(r?.error || '复制失败', false);
+function toggleEditMode() {
+  const svgWrap = $('preview-svg');
+  const imgEl = $('preview-img');
+
+  if (isInEditMode) {
+    exitEditMode();
+  } else {
+    if (!svgWrap.classList.contains('hidden') && svgWrap.querySelector('svg')) {
+      enterEditMode();
+    } else if (!imgEl.classList.contains('hidden')) {
+      setStatus('请先渲染 SVG 格式后再进入画板编辑', false);
+    } else {
+      setStatus('请先渲染预览后再进入画板编辑', false);
+    }
+  }
+}
+
+function enterEditMode() {
+  isInEditMode = true;
+  const btn = $('btn-edit-mode');
+  btn.textContent = '退出画板';
+  btn.classList.add('active');
+
+  const previewWrap = $('preview-wrap');
+  const editor = new MxGraphEditor(previewWrap);
+
+  editor.onExportCallback = (data) => {
+    if (data.kind === 'svg') {
+      addSvgToStash(data.svgText);
+    } else if (data.kind === 'png') {
+      addPngToStashFromBlob(data.blob);
+    }
+  };
+
+  editor.init().then(() => {
+    const currentSource = $('source').value;
+    const converter = new PlantUMLToMxGraphConverter();
+    const mxGraphXml = converter.convert(currentSource);
+    console.log('Generated mxGraph XML:', mxGraphXml);
+    editor.importXML(mxGraphXml);
+    svgEditor = editor;
+  }).catch(err => {
+    console.error('Failed to init mxGraph:', err);
+    setStatus('画板编辑器初始化失败: ' + err.message, false);
+  });
+
+  setStatus('已进入画板编辑模式，可拖拽调整元素位置', true);
+}
+
+function exitEditMode() {
+  isInEditMode = false;
+  const btn = $('btn-edit-mode');
+  btn.textContent = '进入画板';
+  btn.classList.remove('active');
+
+  if (svgEditor) {
+    svgEditor.destroy();
+    svgEditor = null;
+  }
+
+  setStatus('已退出画板编辑模式', true);
+}
+
+async function addSvgToStash(svgText) {
+  if (!window.studio?.stashAdd) {
+    setStatus('暂存区 API 不可用', false);
     return;
   }
-  setStatus(r.mode === 'svg' ? '已复制 SVG 文本到剪贴板' : '已复制 PNG 图像到剪贴板', true);
+  
+  try {
+    const r = await window.studio.stashAdd({
+      kind: 'svg',
+      svgText: svgText,
+      sourceText: '',
+      label: `SVG 产出物 ${new Date().toLocaleString('zh-CN')}`
+    });
+    
+    if (!r?.ok) {
+      setStatus(r?.error || '保存失败', false);
+      return;
+    }
+    
+    setStatus('已保存 SVG 到暂存区', true);
+    await refreshStashList();
+  } catch (e) {
+    setStatus(String(e.message || e), false);
+  }
+}
+
+async function addPngToStashFromBlob(blob) {
+  if (!window.studio?.stashAdd) {
+    setStatus('暂存区 API 不可用', false);
+    return;
+  }
+  
+  try {
+    const arrayBuffer = await blob.arrayBuffer();
+    const r = await window.studio.stashAdd({
+      kind: 'png',
+      arrayBuffer: arrayBuffer,
+      sourceText: '',
+      label: `PNG 产出物 ${new Date().toLocaleString('zh-CN')}`
+    });
+    
+    if (!r?.ok) {
+      setStatus(r?.error || '保存失败', false);
+      return;
+    }
+    
+    setStatus('已保存 PNG 到暂存区', true);
+    await refreshStashList();
+  } catch (e) {
+    setStatus(String(e.message || e), false);
+  }
+}
+
+async function copyStashItem(id) {
+  if (!window.studio?.stashGetFull) return;
+  const r = await window.studio.stashGetFull(id);
+  if (!r?.ok || !r.sourceText) {
+    setStatus('没有源码可复制', false);
+    return;
+  }
+  
+  try {
+    await navigator.clipboard.writeText(r.sourceText);
+    setStatus('已复制 PlantUML 源码到剪贴板', true);
+  } catch {
+    setStatus('复制失败', false);
+  }
 }
 
 async function deleteStashItems(ids) {
@@ -485,8 +781,8 @@ async function deleteStashItems(ids) {
 }
 
 function wireStashGrid() {
-  const grid = $('stash-grid');
-  grid.addEventListener('click', (ev) => {
+  const tree = $('stash-tree');
+  tree.addEventListener('click', (ev) => {
     const btn = ev.target.closest('button');
     if (!btn) return;
     const card = ev.target.closest('.stash-card');
@@ -502,83 +798,124 @@ function wireStashGrid() {
   });
 }
 
+function toggleAgentNLPanel() {
+  const wrap = $('agent-nl-wrap');
+  const btn = $('btn-toggle-agent');
+  
+  if (wrap.classList.contains('hidden')) {
+    wrap.classList.remove('hidden');
+    btn.textContent = '隐藏 Agent';
+  } else {
+    wrap.classList.add('hidden');
+    btn.textContent = 'Agent 绘制';
+  }
+}
+
+function toggleStashPanel() {
+  const panel = $('stash-panel');
+  
+  if (panel.classList.contains('hidden')) {
+    panel.classList.remove('hidden');
+  } else {
+    panel.classList.add('hidden');
+  }
+}
+
+function openAgentSettingsDialog() {
+  const dlg = $('agent-settings-dialog');
+  dlg.showModal();
+}
+
+function closeAgentSettingsDialog() {
+  $('agent-settings-dialog')?.close();
+}
+
+async function createStashFolder() {
+  const dlg = $('stash-folder-dialog');
+  const nameInput = $('stash-folder-name');
+  nameInput.value = '';
+  dlg.showModal();
+}
+
+async function confirmCreateStashFolder() {
+  const dlg = $('stash-folder-dialog');
+  const name = $('stash-folder-name').value.trim();
+  
+  if (!name) {
+    setStatus('请输入文件夹名称', false);
+    return;
+  }
+  
+  if (!window.studio?.stashCreateFolder) {
+    setStatus('创建文件夹 API 不可用', false);
+    return;
+  }
+  
+  const r = await window.studio.stashCreateFolder({ name });
+  
+  if (!r?.ok) {
+    setStatus(r?.error || '创建失败', false);
+    return;
+  }
+  
+  dlg.close();
+  setStatus('文件夹已创建', true);
+  await refreshStashList();
+}
+
+function wireResizer() {
+  const resizer = $('resizer');
+  const editorPane = $('editor-pane');
+  const previewPane = $('preview-pane');
+  const layout = document.querySelector('.layout');
+  
+  if (!resizer || !editorPane || !previewPane || !layout) return;
+  
+  let isDragging = false;
+  
+  const MIN_PREVIEW_RATIO = 0.6;
+  const MAX_PREVIEW_RATIO = 0.8;
+  
+  function startDrag(e) {
+    isDragging = true;
+    resizer.classList.add('dragging');
+    document.addEventListener('mousemove', onDrag);
+    document.addEventListener('mouseup', stopDrag);
+    e.preventDefault();
+  }
+  
+  function onDrag(e) {
+    if (!isDragging) return;
+    
+    const layoutRect = layout.getBoundingClientRect();
+    const mouseX = e.clientX - layoutRect.left;
+    const totalWidth = layoutRect.width;
+    
+    const editorWidth = mouseX;
+    const previewWidth = totalWidth - editorWidth - 4;
+    
+    let previewRatio = previewWidth / totalWidth;
+    previewRatio = Math.max(MIN_PREVIEW_RATIO, Math.min(MAX_PREVIEW_RATIO, previewRatio));
+    
+    const newPreviewWidth = totalWidth * previewRatio;
+    const newEditorWidth = totalWidth - newPreviewWidth - 4;
+    
+    editorPane.style.flex = `0 0 ${(newEditorWidth / totalWidth * 100).toFixed(2)}%`;
+    previewPane.style.flex = `0 0 ${(newPreviewWidth / totalWidth * 100).toFixed(2)}%`;
+  }
+  
+  function stopDrag() {
+    isDragging = false;
+    resizer.classList.remove('dragging');
+    document.removeEventListener('mousemove', onDrag);
+    document.removeEventListener('mouseup', stopDrag);
+  }
+  
+  resizer.addEventListener('mousedown', startDrag);
+}
+
 function isAgentKeyConfigured() {
   return Boolean($('cfg-api-key').value?.trim());
-}
-
-function agentOrchestrationBlock() {
-  return $('agent-orchestration-block');
-}
-
-function refreshAgentCompactBarUi() {
-  const msg = $('agent-compact-msg');
-  const bCollapse = $('btn-agent-collapse');
-  const bSet = $('btn-agent-expand-text');
-  const bGear = $('btn-agent-expand-gear');
-  if (!isAgentKeyConfigured()) {
-    msg.textContent = '';
-    return;
-  }
-  const orch = agentOrchestrationBlock();
-  const collapsed = orch?.classList.contains('agent-orchestration-block--collapsed');
-  if (collapsed) {
-    msg.textContent =
-      'DeepSeek 已配置。下方「自然语言需求」始终可用；点击「设置」、齿轮或顶部「API 与智能生成」可展开 API；Shift+点击或双击设置/齿轮可打开「项目忽略」弹窗。执行日志见菜单「文件」。';
-    bCollapse.classList.add('hidden');
-    bSet.classList.remove('hidden');
-    bGear.classList.remove('hidden');
-    bGear.title = '展开 API 与编排说明';
-  } else {
-    msg.textContent =
-      'API 与编排说明已展开。完成后点击「收起」或再次点击顶部「API 与智能生成」收起。Shift+点击或双击设置/齿轮打开「项目忽略」。日志见菜单「文件」。';
-    bCollapse.classList.remove('hidden');
-    bSet.classList.add('hidden');
-    bGear.classList.add('hidden');
-  }
-}
-
-/** 无密钥：强制展开编排区块并隐藏紧凑栏；已配置：紧凑栏可见且默认收起编排区块 */
-function applyInitialAgentLayoutFromConfig() {
-  const bar = $('agent-compact-bar');
-  const orch = agentOrchestrationBlock();
-  if (!isAgentKeyConfigured()) {
-    bar.classList.add('hidden');
-    orch?.classList.remove('agent-orchestration-block--collapsed');
-    refreshAgentCompactBarUi();
-    return;
-  }
-  bar.classList.remove('hidden');
-  orch?.classList.add('agent-orchestration-block--collapsed');
-  refreshAgentCompactBarUi();
-}
-
-function setAgentMainCollapsed(collapsed) {
-  const bar = $('agent-compact-bar');
-  const orch = agentOrchestrationBlock();
-  if (!isAgentKeyConfigured()) {
-    bar.classList.add('hidden');
-    orch?.classList.remove('agent-orchestration-block--collapsed');
-    refreshAgentCompactBarUi();
-    return;
-  }
-  bar.classList.remove('hidden');
-  if (collapsed) orch?.classList.add('agent-orchestration-block--collapsed');
-  else orch?.classList.remove('agent-orchestration-block--collapsed');
-  refreshAgentCompactBarUi();
-}
-
-function toggleAgentMainFromToolbar() {
-  if (!isAgentKeyConfigured()) {
-    $('agent-compact-bar').classList.add('hidden');
-    agentOrchestrationBlock()?.classList.remove('agent-orchestration-block--collapsed');
-    refreshAgentCompactBarUi();
-    $('cfg-api-key').focus();
-    setStatus('请先填写 DeepSeek API Key', null);
-    return;
-  }
-  $('agent-compact-bar').classList.remove('hidden');
-  agentOrchestrationBlock()?.classList.toggle('agent-orchestration-block--collapsed');
-  refreshAgentCompactBarUi();
 }
 
 async function loadAgentForm() {
@@ -594,15 +931,12 @@ async function loadAgentForm() {
     selectedProjectRoot = String(c.lastProjectRoot || '').trim();
     const pr = $('project-root-display');
     if (pr) pr.value = selectedProjectRoot;
-    // 加载国内高校模式状态
     isChinaUnivMode = Boolean(c.chinaUnivMode);
     const modeCb = $('china-univ-mode');
     if (modeCb) modeCb.checked = isChinaUnivMode;
-    // 如果是国内高校模式，并且源码还是默认示例，就换成国内高校的示例
     if (isChinaUnivMode && $('source').value === DEFAULT_SOURCE) {
       $('source').value = CHINA_UNIV_DEFAULT_SOURCE;
     }
-    applyInitialAgentLayoutFromConfig();
   } catch {
     /* ignore */
   }
@@ -611,15 +945,6 @@ async function loadAgentForm() {
 async function saveAgentForm() {
   if (!window.studio?.setAgentConfig) return;
   try {
-    let hadDiskKey = false;
-    if (window.studio?.getAgentConfig) {
-      try {
-        const disk = await window.studio.getAgentConfig();
-        hadDiskKey = Boolean(disk?.apiKey?.trim());
-      } catch {
-        hadDiskKey = false;
-      }
-    }
     await window.studio.setAgentConfig({
       apiKey: $('cfg-api-key').value,
       baseUrl: $('cfg-base-url').value,
@@ -628,19 +953,7 @@ async function saveAgentForm() {
       projectIgnoreGlobs: projectIgnoreGlobsValue(),
       chinaUnivMode: isChinaUnivMode,
     });
-    const nowKey = $('cfg-api-key').value.trim();
-    const bar = $('agent-compact-bar');
-    const orch = agentOrchestrationBlock();
-    if (!nowKey) {
-      bar.classList.add('hidden');
-      orch?.classList.remove('agent-orchestration-block--collapsed');
-    } else {
-      bar.classList.remove('hidden');
-      if (!hadDiskKey && nowKey) {
-        orch?.classList.add('agent-orchestration-block--collapsed');
-      }
-    }
-    refreshAgentCompactBarUi();
+    closeAgentSettingsDialog();
     setStatus('已保存 API 与编排设置', true);
   } catch (e) {
     setStatus(String(e.message || e), false);
@@ -649,11 +962,9 @@ async function saveAgentForm() {
 
 function onChinaUnivModeToggle() {
   isChinaUnivMode = $('china-univ-mode').checked;
-  // 自动保存配置
   if (window.studio?.setAgentConfig) {
     window.studio.setAgentConfig({ chinaUnivMode: isChinaUnivMode }).catch(() => {});
   }
-  // 如果开启国内高校模式，并且当前源码是默认示例，就换成国内高校的示例
   if (isChinaUnivMode && $('source').value === DEFAULT_SOURCE) {
     $('source').value = CHINA_UNIV_DEFAULT_SOURCE;
   }
@@ -698,7 +1009,7 @@ async function runAgent() {
 
 function openProjectImportedDialog(absolutePath) {
   const dlg = $('project-imported-dialog');
-  $('project-imported-msg').textContent = `已选择项目目录：\n\n${absolutePath}\n\n索引将在「估算上下文」或「一键生成」时在后台构建；主界面不再展示目录摘要。`;
+  $('project-imported-msg').textContent = `已选择项目目录：\n\n${absolutePath}\n\n索引将在后续生成时在后台构建。`;
   dlg.showModal();
 }
 
@@ -820,6 +1131,9 @@ function wireAppDialogs() {
   closeByBackdrop('session-log-dialog');
   closeByBackdrop('error-log-dialog');
   closeByBackdrop('project-imported-dialog');
+  closeByBackdrop('stash-add-dialog');
+  closeByBackdrop('stash-folder-dialog');
+  closeByBackdrop('agent-settings-dialog');
 
   $('agent-advanced-close-x')?.addEventListener('click', () => closeAgentAdvancedDialog());
   $('agent-advanced-close-btn')?.addEventListener('click', () => closeAgentAdvancedDialog());
@@ -835,6 +1149,20 @@ function wireAppDialogs() {
   $('error-log-dialog-close')?.addEventListener('click', () => $('error-log-dialog')?.close());
   $('project-imported-ok')?.addEventListener('click', () => $('project-imported-dialog')?.close());
   $('project-imported-close-x')?.addEventListener('click', () => $('project-imported-dialog')?.close());
+  
+  $('stash-add-close')?.addEventListener('click', () => $('stash-add-dialog')?.close());
+  $('stash-add-cancel')?.addEventListener('click', () => $('stash-add-dialog')?.close());
+  $('btn-stash-add-confirm')?.addEventListener('click', () => addCurrentToStashWithFolder());
+  
+  $('stash-folder-close')?.addEventListener('click', () => $('stash-folder-dialog')?.close());
+  $('stash-folder-cancel')?.addEventListener('click', () => $('stash-folder-dialog')?.close());
+  $('btn-stash-folder-confirm')?.addEventListener('click', () => confirmCreateStashFolder());
+  
+  $('agent-settings-close')?.addEventListener('click', () => closeAgentSettingsDialog());
+  $('btn-agent-advanced')?.addEventListener('click', () => {
+    closeAgentSettingsDialog();
+    openAgentAdvancedDialog();
+  });
 }
 
 function wireAgentExpandAdvanced(elId) {
@@ -846,7 +1174,7 @@ function wireAgentExpandAdvanced(elId) {
       openAgentAdvancedDialog();
       return;
     }
-    setAgentMainCollapsed(false);
+    openAgentSettingsDialog();
   });
   el.addEventListener('dblclick', (e) => {
     e.preventDefault();
@@ -855,30 +1183,26 @@ function wireAgentExpandAdvanced(elId) {
 }
 
 function init() {
-  // 国内高校模式开关监听
   $('china-univ-mode')?.addEventListener('change', () => onChinaUnivModeToggle());
   
-  // 默认源码加载 - 先加载默认，再在 loadAgentForm 时根据模式替换
   $('source').value = DEFAULT_SOURCE;
   $('btn-render').addEventListener('click', () => render());
   $('btn-export').addEventListener('click', () => exportFile());
   $('format').addEventListener('change', clearPreview);
 
-  $('btn-agent-settings').addEventListener('click', () => toggleAgentMainFromToolbar());
-
-  wireAgentExpandAdvanced('btn-agent-expand-text');
-  wireAgentExpandAdvanced('btn-agent-expand-gear');
-  $('btn-agent-collapse').addEventListener('click', () => setAgentMainCollapsed(true));
+  $('btn-agent-settings').addEventListener('click', () => openAgentSettingsDialog());
 
   $('btn-save-agent-cfg').addEventListener('click', () => saveAgentForm());
   $('btn-agent-run').addEventListener('click', () => runAgent());
 
   $('btn-project-pick')?.addEventListener('click', () => pickProjectDirectory());
-  $('btn-project-estimate')?.addEventListener('click', () => estimateProjectContext());
-  $('btn-project-generate')?.addEventListener('click', () => runAgentProjectOneClick());
 
-  $('btn-stash-add').addEventListener('click', () => addCurrentToStash());
+  $('btn-stash-add').addEventListener('click', () => openStashAddDialog());
+
+  $('btn-edit-mode').addEventListener('click', () => toggleEditMode());
+
   $('btn-stash-refresh').addEventListener('click', () => refreshStashList());
+  $('btn-stash-new-folder').addEventListener('click', () => createStashFolder());
   $('btn-stash-select-all').addEventListener('click', () => {
     document.querySelectorAll('.stash-item-cb').forEach((cb) => {
       cb.checked = true;
@@ -901,9 +1225,7 @@ function init() {
     await deleteStashItems(ids);
   });
   $('btn-stash-collapse').addEventListener('click', () => {
-    const body = $('stash-body');
-    const collapsed = body.classList.toggle('hidden');
-    $('btn-stash-collapse').textContent = collapsed ? '展开暂存区' : '收起';
+    toggleStashPanel();
   });
 
   const stashDlg = $('stash-view-dialog');
@@ -912,8 +1234,12 @@ function init() {
     if (ev.target === stashDlg) stashDlg.close();
   });
 
+  $('btn-toggle-agent')?.addEventListener('click', () => toggleAgentNLPanel());
+  $('btn-toggle-stash')?.addEventListener('click', () => toggleStashPanel());
+
   wirePreviewContextMenu();
   wireStashGrid();
+  wireResizer();
 
   if (window.studio?.onMenuCopyPreview) {
     window.studio.onMenuCopyPreview(() => {
@@ -931,7 +1257,6 @@ function init() {
   loadAgentForm();
   refreshStashList().catch(() => {});
 
-  /* ---------- 授权激活 ---------- */
   wireLicenseDialog();
 
   getBase()
@@ -969,7 +1294,6 @@ async function refreshLicenseStatus() {
       text.textContent = status.error || '未激活';
       deviceArea.classList.remove('hidden');
       activateArea.classList.remove('hidden');
-      // 加载设备信息
       await refreshDeviceInfo();
     }
   } catch (e) {
@@ -1048,13 +1372,11 @@ function wireLicenseDialog() {
   const dlg = $('license-dialog');
   if (!dlg) return;
 
-  // 关闭按钮
   $('license-dialog-close').addEventListener('click', () => dlg.close());
   dlg.addEventListener('click', (ev) => {
     if (ev.target === dlg) dlg.close();
   });
 
-  // 复制激活设备码
   $('btn-license-copy-device-code').addEventListener('click', async () => {
     const code = $('license-device-code').textContent;
     if (code && code !== '获取失败') {
@@ -1067,24 +1389,15 @@ function wireLicenseDialog() {
     }
   });
 
-  // 激活按钮
   $('btn-license-activate').addEventListener('click', () => handleLicenseActivate());
 
-  // 卸载激活按钮
   $('btn-license-deactivate').addEventListener('click', () => handleLicenseDeactivate());
 
-  // 打开对话框时刷新状态
-  dlg.addEventListener('open', () => {
-    // dialog 没有 open 事件，用 before-show 模拟
-  });
-
-  // 暴露打开方法到全局（供菜单调用）
   window.openLicenseDialog = async () => {
     await refreshLicenseStatus();
     if (typeof dlg.showModal === 'function') dlg.showModal();
   };
 
-  // 在菜单中注册
   if (window.studio?.onMenuLicense) {
     window.studio.onMenuLicense(() => {
       window.openLicenseDialog();

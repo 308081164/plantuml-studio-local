@@ -5,14 +5,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src blob: data: 'self'; connect-src http://127.0.0.1:* http://localhost:* blob:; font-src 'self'; base-uri 'self'; form-action 'none';"
+      content="default-src * 'unsafe-inline' 'unsafe-eval'; script-src * 'unsafe-inline' 'unsafe-eval' 'self'; style-src * 'unsafe-inline' 'unsafe-eval' 'self'; img-src * data: blob: file: 'self'; connect-src * http://127.0.0.1:* http://localhost:* https://cdn.jsdelivr.net https://api.deepseek.com blob: file:; font-src * data:; object-src *; child-src *; frame-src *; manifest-src *; worker-src * blob:;"
     />
     <title>PlantUML 本地工作室</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
     <header class="topbar">
-      <h1>PlantUML 本地工作室</h1>
+      <div class="title-area">
+        <h1>PlantUML 本地工作室</h1>
+        <div class="title-sub">
+          <span class="project-label">项目目录驱动制图</span>
+          <span class="project-badge">2.0 Beta</span>
+          <span class="project-path" id="project-root-display">未选择项目目录…</span>
+          <button type="button" id="btn-project-pick" class="project-pick-btn" title="选择项目文件夹">
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path fill="currentColor" d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V6h5.17l1.41 1.41.59.59H20v10z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
       <div class="toolbar">
         <label class="fmt">
           输出格式
@@ -27,22 +39,46 @@
         </label>
         <button type="button" id="btn-render" class="primary">渲染预览</button>
         <button type="button" id="btn-export">导出文件…</button>
-        <button type="button" id="btn-stash-add" title="将当前预览保存到下方暂存区，便于比对与批量管理">
-          加入暂存区
-        </button>
-        <button type="button" id="btn-agent-settings" class="ghost" title="已配置密钥时：展开/收起 DeepSeek 编排与 API；未配置密钥时：聚焦密钥输入">
+        <button type="button" id="btn-agent-settings" class="ghost" title="API与智能生成设置">
           API与智能生成
         </button>
         <span id="status" class="status"></span>
       </div>
     </header>
     <main class="layout">
-      <section class="pane editor-pane">
-        <div class="pane-title">源码</div>
-        <textarea id="source" spellcheck="false"></textarea>
+      <section class="pane editor-pane" id="editor-pane">
+        <div class="pane-title">
+          源码
+          <button type="button" id="btn-toggle-agent" class="toggle-agent-btn" title="切换Agent绘制面板">
+            Agent绘制
+          </button>
+        </div>
+        <div class="editor-content" id="editor-content">
+          <section id="agent-nl-wrap" class="agent-nl-wrap hidden">
+            <div class="agent-nl-header">
+              <label for="agent-request">自然语言需求</label>
+            </div>
+            <textarea id="agent-request" rows="6" spellcheck="false" placeholder="例如：画一个用户登录的时序图，包含前端、网关、认证服务与数据库…"></textarea>
+            <div class="agent-nl-actions">
+              <button type="button" id="btn-agent-run" class="primary">生成 PlantUML 并填入编辑器</button>
+            </div>
+          </section>
+          <textarea id="source" spellcheck="false"></textarea>
+        </div>
       </section>
-      <section class="pane preview-pane">
-        <div class="pane-title">预览 <span class="pane-sub">右键可复制 PNG 到剪贴板</span></div>
+      <div class="resizer" id="resizer" title="拖拽调整面板宽度"></div>
+      <section class="pane preview-pane" id="preview-pane">
+        <div class="pane-title">
+          预览 <span class="pane-sub">右键可复制 PNG 到剪贴板</span>
+          <div class="pane-actions">
+            <button type="button" id="btn-edit-mode" class="edit-mode-btn" title="进入画板进行图形编辑">
+              进入画板
+            </button>
+            <button type="button" id="btn-stash-add" class="stash-add-btn" title="将当前预览保存到暂存区">
+              加入暂存区
+            </button>
+          </div>
+        </div>
         <div id="preview-wrap" class="preview-wrap">
           <div id="preview-placeholder" class="placeholder">点击「渲染预览」生成图像</div>
           <div id="preview-svg" class="preview-svg hidden"></div>
@@ -51,21 +87,28 @@
         <pre id="errors" class="errors hidden"></pre>
       </section>
     </main>
-    <section id="stash-panel" class="stash-panel">
+    <footer class="foot">
+      <div class="foot-actions">
+        <button type="button" id="btn-toggle-stash" class="toggle-stash-btn">产出物暂存区</button>
+      </div>
+      <small>渲染由本机 Java + PlantUML PicoWeb 完成；DeepSeek 仅在您使用「智能生成」时经 HTTPS 访问您配置的 Base URL。</small>
+    </footer>
+    <section id="stash-panel" class="stash-panel hidden">
       <div class="stash-bar">
         <h2 class="stash-heading">产出物暂存区</h2>
         <span id="stash-count" class="stash-count">0 项</span>
         <div class="stash-bar-actions">
+          <button type="button" id="btn-stash-new-folder">新建文件夹</button>
           <button type="button" id="btn-stash-refresh">刷新</button>
           <button type="button" id="btn-stash-select-all">全选</button>
           <button type="button" id="btn-stash-select-none">取消全选</button>
           <button type="button" id="btn-stash-delete-batch" class="stash-danger">批量删除</button>
-          <button type="button" id="btn-stash-collapse" class="ghost" title="折叠/展开暂存区">收起</button>
+          <button type="button" id="btn-stash-collapse" class="ghost">收起</button>
         </div>
       </div>
       <div id="stash-body" class="stash-body">
         <p id="stash-empty" class="stash-empty">暂无条目。渲染预览后点击「加入暂存区」即可持久保存，便于多图比对。</p>
-        <div id="stash-grid" class="stash-grid hidden"></div>
+        <div id="stash-tree" class="stash-tree hidden"></div>
       </div>
     </section>
     <dialog id="stash-view-dialog" class="stash-dialog">
@@ -75,92 +118,71 @@
       </div>
       <div id="stash-dialog-content" class="stash-dialog-content"></div>
     </dialog>
-    <section id="agent-wrap" class="agent-wrap">
-      <div id="agent-compact-bar" class="agent-compact-bar hidden" role="region" aria-label="DeepSeek 快捷入口">
-        <p id="agent-compact-msg" class="agent-compact-msg"></p>
-        <div class="agent-compact-actions">
-          <button type="button" id="btn-agent-collapse" class="hidden">收起</button>
-          <button type="button" id="btn-agent-expand-text" class="ghost" title="展开 API；Shift+点击或双击打开「项目忽略」弹窗">
-            设置
-          </button>
-          <button
-            type="button"
-            id="btn-agent-expand-gear"
-            class="agent-gear-btn"
-            title="展开 API；Shift+点击或双击打开「项目忽略」弹窗"
-            aria-label="设置"
-          >
-            <svg class="agent-gear-svg" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-              <path
-                fill="currentColor"
-                d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.6-.22l-2.39.96c-.52-.4-1.08-.73-1.69-.98l-.36-2.54a.484.484 0 0 0-.48-.42h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.61.25-1.17.59-1.69.98l-2.39-.96c-.22-.08-.47 0-.6.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.31-.08.63-.08.94s.03.63.08.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.52.4 1.08.73 1.69.98l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.61-.25 1.17-.59 1.69-.98l2.39.96c.22.08.47 0 .6-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"
-              />
-            </svg>
-          </button>
+    <dialog id="stash-add-dialog" class="app-dialog">
+      <div class="app-dialog-head">
+        <h3 class="app-dialog-title">加入暂存区</h3>
+        <button type="button" id="stash-add-close" class="app-dialog-close">关闭</button>
+      </div>
+      <div class="stash-add-body">
+        <label for="stash-add-name">名称</label>
+        <input id="stash-add-name" type="text" placeholder="输入名称" />
+        <label for="stash-add-folder">保存位置</label>
+        <select id="stash-add-folder">
+          <option value="">暂存区根目录</option>
+        </select>
+      </div>
+      <div class="app-dialog-actions">
+        <button type="button" id="btn-stash-add-confirm" class="primary">确定</button>
+        <button type="button" id="stash-add-cancel" class="ghost">取消</button>
+      </div>
+    </dialog>
+    <dialog id="stash-folder-dialog" class="app-dialog">
+      <div class="app-dialog-head">
+        <h3 class="app-dialog-title">新建文件夹</h3>
+        <button type="button" id="stash-folder-close" class="app-dialog-close">关闭</button>
+      </div>
+      <div class="stash-folder-body">
+        <label for="stash-folder-name">文件夹名称</label>
+        <input id="stash-folder-name" type="text" placeholder="输入文件夹名称" />
+      </div>
+      <div class="app-dialog-actions">
+        <button type="button" id="btn-stash-folder-confirm" class="primary">确定</button>
+        <button type="button" id="stash-folder-cancel" class="ghost">取消</button>
+      </div>
+    </dialog>
+    <dialog id="agent-settings-dialog" class="app-dialog agent-settings-dialog">
+      <div class="app-dialog-head">
+        <h3 class="app-dialog-title">API 与智能生成设置</h3>
+        <button type="button" id="agent-settings-close" class="app-dialog-close">关闭</button>
+      </div>
+      <div class="agent-settings-body">
+        <div class="agent-grid">
+          <div class="agent-field">
+            <label for="cfg-api-key">DeepSeek API Key</label>
+            <input id="cfg-api-key" type="password" autocomplete="off" placeholder="在 platform.deepseek.com 获取" />
+          </div>
+          <div class="agent-field">
+            <label for="cfg-base-url">Base URL</label>
+            <input id="cfg-base-url" type="url" placeholder="https://api.deepseek.com" />
+          </div>
+          <div class="agent-field">
+            <label for="cfg-model">模型名</label>
+            <input id="cfg-model" type="text" placeholder="deepseek-chat" />
+          </div>
+          <div class="agent-field agent-field--narrow">
+            <label for="cfg-max-retries">失败后的修正轮数</label>
+            <input id="cfg-max-retries" type="number" min="0" max="15" step="1" title="首次生成失败后，最多再请求 DeepSeek 修正的次数" />
+          </div>
+        </div>
+        <div class="agent-settings-hint">
+          <p>与仓库内《UML大师-Agent-开发计划》一致：仅调用 DeepSeek 官方兼容接口；PlantUML 使用本机未改 JAR；密钥保存在用户目录，不会写入仓库。</p>
+          <button type="button" id="btn-agent-advanced" class="ghost" title="Shift+点击或双击打开「项目忽略」弹窗">项目忽略设置</button>
+        </div>
+        <div class="agent-settings-actions">
+          <button type="button" id="btn-save-agent-cfg" class="primary">保存设置</button>
         </div>
       </div>
-      <section id="agent-panel" class="agent-panel">
-        <div id="agent-orchestration-block" class="agent-orchestration-block">
-          <div class="agent-head">
-            <h2 class="agent-title">DeepSeek 编排（需求 → PlantUML → 本地校验 → 自动修正）</h2>
-            <p class="agent-hint">
-              与仓库内《UML大师-Agent-开发计划》一致：仅调用 DeepSeek 官方兼容接口；PlantUML 使用本机未改 JAR；密钥保存在用户目录，不会写入仓库。
-            </p>
-          </div>
-          <div class="agent-grid">
-            <div class="agent-field">
-              <label for="cfg-api-key">DeepSeek API Key</label>
-              <input id="cfg-api-key" type="password" autocomplete="off" placeholder="在 platform.deepseek.com 获取" />
-            </div>
-            <div class="agent-field">
-              <label for="cfg-base-url">Base URL</label>
-              <input id="cfg-base-url" type="url" placeholder="https://api.deepseek.com" />
-            </div>
-            <div class="agent-field">
-              <label for="cfg-model">模型名</label>
-              <input id="cfg-model" type="text" placeholder="deepseek-chat" />
-            </div>
-            <div class="agent-field agent-field--narrow">
-              <label for="cfg-max-retries">失败后的修正轮数</label>
-              <input id="cfg-max-retries" type="number" min="0" max="15" step="1" title="首次生成失败后，最多再请求 DeepSeek 修正的次数" />
-            </div>
-            <div class="agent-actions">
-              <button type="button" id="btn-save-agent-cfg" class="primary">保存设置</button>
-            </div>
-          </div>
-        </div>
-        <div class="agent-nl">
-          <label for="agent-request">自然语言需求</label>
-          <textarea id="agent-request" rows="3" spellcheck="false" placeholder="例如：画一个用户登录的时序图，包含前端、网关、认证服务与数据库…"></textarea>
-          <div class="agent-nl-actions">
-            <button type="button" id="btn-agent-run" class="primary">生成 PlantUML 并填入编辑器</button>
-          </div>
-        </div>
-        <div class="agent-project">
-          <div class="agent-project-head">
-            <span class="agent-project-title">项目目录驱动制图</span>
-            <span class="agent-project-badge" title="对应《UML大师-Agent-开发计划》第 11 节 · M3 Beta">2.0 Beta</span>
-          </div>
-          <p class="agent-project-hint">
-            选择本地工程根目录后，索引在一键生成时由<strong>本机</strong>构建；先经 DeepSeek「规划」选文件，再聚合正文与制图目标发送。默认尊重
-            <code>.gitignore</code>（简化匹配）并排除常见密钥路径。自定义 glob 见顶部紧凑栏「设置 / 齿轮」的
-            <strong>Shift+点击或双击</strong>弹窗。若粗算总上下文超过约 100 万 tokens 将中止（不自动压缩）。智能生成与 PlantUML 报错见菜单<strong>文件</strong>中的日志项。
-          </p>
-          <div class="agent-project-row">
-            <input id="project-root-display" type="text" readonly placeholder="未选择项目目录…" title="当前项目根路径" />
-            <button type="button" id="btn-project-pick">选择项目文件夹…</button>
-          </div>
-          <div class="agent-project-actions">
-            <button type="button" id="btn-project-estimate" class="ghost" title="不调用 DeepSeek，仅按启发式选文件粗算首轮消息 tokens">
-              估算上下文
-            </button>
-            <button type="button" id="btn-project-generate" class="primary">
-              一键生成：规划选文件 + 源码 +「自然语言需求」
-            </button>
-          </div>
-        </div>
-      </section>
-    </section>
+    </dialog>
     <dialog id="agent-advanced-dialog" class="app-dialog">
       <div class="app-dialog-head">
         <h3 class="app-dialog-title">高级：项目目录扫描忽略</h3>
@@ -212,12 +234,10 @@
         <button type="button" id="license-dialog-close" class="app-dialog-close">关闭</button>
       </div>
       <div id="license-dialog-body" class="license-dialog-body">
-        <!-- 状态区域 -->
         <div id="license-status-area" class="license-status-area">
           <div id="license-status-icon" class="license-status-icon">🔒</div>
           <div id="license-status-text" class="license-status-text">正在检查授权状态…</div>
         </div>
-        <!-- 设备信息区域 -->
         <div id="license-device-area" class="license-device-area hidden">
           <div class="license-section-title">设备信息</div>
           <div class="license-device-row">
@@ -231,7 +251,6 @@
           </div>
           <p class="license-hint">请将以上激活设备码提供给管理员，管理员将为您生成软件激活码。</p>
         </div>
-        <!-- 激活表单 -->
         <div id="license-activate-area" class="license-activate-area hidden">
           <div class="license-section-title">输入软件激活码</div>
           <textarea id="license-code-input" class="license-code-input" rows="3" spellcheck="false" placeholder="请粘贴管理员提供的软件激活码…"></textarea>
@@ -243,8 +262,7 @@
         </div>
       </div>
     </dialog>
-    <footer class="foot">
-      <small>渲染由本机 Java + PlantUML PicoWeb 完成；DeepSeek 仅在您使用「智能生成」时经 HTTPS 访问您配置的 Base URL。</small>
-    </footer>
+    <script src="./mxgraph-editor.js"></script>
     <script src="./app.js" type="module"></script>
   </body>
+</html>

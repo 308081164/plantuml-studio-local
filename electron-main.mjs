@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, clipboard, nativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, clipboard, nativeImage, session } from 'electron';
 import { spawn } from 'node:child_process';
 import {
   existsSync,
@@ -129,7 +129,7 @@ function findKnowledgeBasePath() {
   return null;
 }
 
-function readKnowledgeBaseSnippet(maxChars = 16000) {
+function readKnowledgeBaseSnippet(maxChars = 40000) {
   const p = findKnowledgeBasePath();
   if (!p) return '';
   try {
@@ -153,12 +153,14 @@ function buildAgentSystemPrompt(kbSnippet, cfg) {
    skinparam ConditionStyle InsideDiamond
    skinparam ConditionEndStyle HLine
 
-3️⃣ 开始节点必须是：:开始;
+3️⃣ 开始节点必须是：:开始;（不带任何标签）
    ❌ 错误写法：start
+   ❌ 错误写法：:开始; <<task>>
    ✅ 正确写法：:开始;
 
-4️⃣ 结束节点必须是：:结束;
+4️⃣ 结束节点必须是：:结束;（不带任何标签）
    ❌ 错误写法：stop
+   ❌ 错误写法：:结束; <<task>>
    ✅ 正确写法：:结束;
 
 5️⃣ 【核心节点形状选择规则（**重要！）
@@ -170,22 +172,132 @@ function buildAgentSystemPrompt(kbSnippet, cfg) {
      平行四边形，表示与外部环境进行数据交互
      使用场景：读取用户输入、打印报表、显示结果、从文件读数据
 
+   - 属性节点（椭圆）：:内容; <<cn-ellipse>>
+     椭圆形状，用于表示实体的属性（陈氏ER图专用）
+     使用场景：学号、姓名、课程号等
+
    【判断原则：
    矩形 <<task>>：内部逻辑改变数据的内容、结构或存储位置。只要数据"发生某种变化"（包括赋值、计算、判断分支前的准备），就用矩形。
    平行四边形 <<save>>：数据从外部（键盘、文件、网络、传感器）进入系统，或从系统输出到外部（屏幕、打印机、文件）。数据"过路"而不改变其值、不产生新值。
+   椭圆 <<cn-ellipse>>：用于陈氏ER图中的属性表示。
 
    【示例】
    :计算总分 = 语文 + 数学; <<task>>
    :请输入用户名; <<save>>
    :显示错误信息"密码错误"; <<save>>
-   :从 order.csv 读取一行记录; <<save>>
-   :总分 = 语文 + 数学; <<task>>
-   :读取配置文件; <<save>>
-   :解析配置文件; <<task>>
-   :打印预览; <<save>>
-   :把用户输入保存到变量; <<save>>
+   :学号; <<cn-ellipse>>
+   :姓名; <<cn-ellipse>>
 
-6️⃣ 每一步的输出结构（严格按顺序）：
+6️⃣ 【陈氏ER图特殊规则】
+   当用户要求绘制ER图、实体关系图、E-R图、数据库概念模型时，**必须使用 @startchen 语法**：
+   
+   【核心语法】
+   - 实体（矩形）：entity "显示名" as 别名 { 属性定义 }
+     - 属性定义格式：每行一个属性，主键加 <<key>>
+     - 示例：entity "学生" as Student { 学号 <<key>> 姓名 }
+   - 关系（菱形）：relationship "显示名" as 别名 { }
+     - ⚠️ 注意：花括号必须单独占一行！
+     - ❌ 错误：relationship "拥有" as Own { }
+     - ✅ 正确：relationship "拥有" as Own {
+       }
+   - 连接与基数：使用 -1- / -N- / -M- 连接
+   
+   【基数含义】
+   - -1- : 一对一关系
+   - -N- : 一对多关系  
+   - -M- : 多对多关系
+   
+   【属性类型标记】
+   - <<key>> : 主键/唯一标识（如学号）
+   - <<derived>> : 派生属性（如年龄）
+   - <<multi>> : 多值属性（如电话）
+   
+   【布局优化配置】
+   skinparam defaultFontSize 20
+   skinparam dpi 150
+   skinparam spacing 50
+   
+   <style>
+   chenEntity {
+     BackGroundColor white
+     BorderColor black
+     FontSize 20
+   }
+   chenRelationship {
+     BackGroundColor white
+     BorderColor black
+     FontSize 20
+   }
+   chenAttribute {
+     BackGroundColor white
+     BorderColor black
+     FontSize 18
+   }
+   </style>
+
+   【陈氏ER图完整示例】
+   @startchen "学生选课系统 ER 图（陈氏表示法）"
+   left to right direction
+   
+   skinparam defaultFontSize 20
+   skinparam dpi 150
+   skinparam spacing 50
+   
+   <style>
+   chenEntity {
+     BackGroundColor white
+     BorderColor black
+     FontSize 20
+   }
+   chenRelationship {
+     BackGroundColor white
+     BorderColor black
+     FontSize 20
+   }
+   chenAttribute {
+     BackGroundColor white
+     BorderColor black
+     FontSize 18
+   }
+   </style>
+   
+   entity "学生" as Student {
+     学号 <<key>>
+     姓名
+     年龄
+     班号
+   }
+   
+   entity "课程" as Course {
+     课程号 <<key>>
+     课程名
+     学分
+   }
+   
+   entity "教师" as Teacher {
+     教师号 <<key>>
+     姓名
+     职称
+   }
+   
+   relationship "选修" as Enroll {
+   }
+   relationship "讲授" as Teach {
+   }
+   
+   Student -N- Enroll
+   Enroll -N- Course
+   
+   Teacher -1- Teach
+   Teach -N- Course
+   @endchen
+   
+   【注意】
+   - ER图使用 @startchen/@endchen，不需要 @startuml activity
+   - ⚠️ 严禁使用 note 指令！Chen ER 图语法不支持 note，使用会导致语法错误
+   - 如果需要添加说明，请在实体属性中用注释或在关系名称中体现
+
+7️⃣ 每一步的输出结构（严格按顺序）：
    @startuml activity
    title [流程图标题]
    skinparam ActivityShape roundedbox
@@ -306,9 +418,15 @@ function extractPlantumlFromModelText(text) {
  * 1. 把 @startuml 变成 @startuml activity（关键！）
  * 2. 插入 skinparam 配置（如果没有的话）
  * 3. 只替换完整独立的 start/stop（避免误伤）
+ * 注意：@startchen 语法不需要转换，保持原样
  */
 function applyChinaUnivModeIfNeeded(source, cfg) {
   if (!cfg.chinaUnivMode) return source;
+  
+  // @startchen 语法有自己的规则，不需要应用国内高校模式转换
+  if (source.includes('@startchen')) {
+    return source;
+  }
   
   let result = source;
   
@@ -1313,7 +1431,8 @@ async function createWindow() {
       preload: join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
+      sandbox: false,
+      webSecurity: false,
     },
   });
 
@@ -1324,7 +1443,21 @@ async function createWindow() {
   });
 }
 
+app.commandLine.appendSwitch('disable-web-security');
+  app.commandLine.appendSwitch('allow-file-access-from-files');
+
 app.whenReady().then(async () => {
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [
+          "default-src * 'unsafe-inline' 'unsafe-eval'; script-src * 'unsafe-inline' 'unsafe-eval'; style-src * 'unsafe-inline'; img-src * data: blob: file:; connect-src * http://127.0.0.1:* http://localhost:* https://cdn.jsdelivr.net https://api.deepseek.com file:; media-src *; font-src *; object-src *; child-src *; frame-src *; manifest-src *"
+        ]
+      }
+    });
+  });
+
   registerIpcHandlers();
   buildZhMenu();
   await createWindow();

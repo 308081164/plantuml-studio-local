@@ -19,7 +19,7 @@
     "appId": "com.uml_master.plantuml-studio",
     "productName": "PlantUML本地工作室",
     "directories": {
-      "output": "release"
+      "output": "release_new"
     },
     "icon": "assets/app-logo-512.png",
     "files": [
@@ -36,28 +36,38 @@
       {
         "from": "../plantuml-master/build/libs",
         "to": "plantuml",
-        "filter": ["plantuml-*.jar"]
+        "filter": [
+          "plantuml-*.jar"
+        ]
       },
       {
         "from": "vendor/jre",
         "to": "jre",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "../PlantUML-Agent-Knowledge-Base.md",
         "to": "kb",
-        "filter": ["PlantUML-Agent-Knowledge-Base.md"]
+        "filter": [
+          "PlantUML-Agent-Knowledge-Base.md"
+        ]
       }
     ],
     "win": {
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
@@ -69,7 +79,10 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "PlantUML本地工作室",
-      "installerLanguages": ["zh_CN", "en_US"],
+      "installerLanguages": [
+        "zh_CN",
+        "en_US"
+      ],
       "language": "2052",
       "warningsAsErrors": false
     }
@@ -78,5 +91,8 @@
     "adm-zip": "^0.5.16",
     "electron": "^33.2.0",
     "electron-builder": "^25.1.8"
+  },
+  "dependencies": {
+    "mxgraph": "^4.2.2"
   }
 }
