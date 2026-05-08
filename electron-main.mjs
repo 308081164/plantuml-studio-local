@@ -120,6 +120,7 @@ function saveAgentConfig(partial) {
 function findKnowledgeBasePath() {
   const candidates = [
     join(process.resourcesPath || '', 'kb', 'PlantUML-Agent-Knowledge-Base.md'),
+    join(__dirname, 'vendor', 'kb', 'PlantUML-Agent-Knowledge-Base.md'),
     join(__dirname, '..', 'PlantUML-Agent-Knowledge-Base.md'),
     join(__dirname, 'PlantUML-Agent-Knowledge-Base.md'),
   ];
@@ -768,6 +769,17 @@ function findPlantumlJar() {
   const envPath = process.env.PLANTUML_JAR;
   if (envPath && existsSync(envPath)) return envPath;
 
+  // 优先：项目内部 vendor/plantuml/（开发环境，独立化改造）
+  const vendorJar = join(__dirname, 'vendor', 'plantuml');
+  if (existsSync(vendorJar)) {
+    const jars = readdirSync(vendorJar).filter((f) => f.startsWith('plantuml-') && f.endsWith('.jar'));
+    if (jars.length) {
+      jars.sort((a, b) => statSync(join(vendorJar, b)).mtimeMs - statSync(join(vendorJar, a)).mtimeMs);
+      return join(vendorJar, jars[0]);
+    }
+  }
+
+  // 兼容旧路径：plantuml-master/build/libs/
   const devLibs = join(__dirname, '..', 'plantuml-master', 'build', 'libs');
   if (existsSync(devLibs)) {
     const jars = readdirSync(devLibs).filter((f) => f.startsWith('plantuml-') && f.endsWith('.jar'));
@@ -777,6 +789,7 @@ function findPlantumlJar() {
     }
   }
 
+  // 打包后的 resources/plantuml/
   const resLibs = join(process.resourcesPath || '', 'plantuml');
   if (existsSync(resLibs)) {
     const jars = readdirSync(resLibs).filter((f) => f.startsWith('plantuml-') && f.endsWith('.jar'));

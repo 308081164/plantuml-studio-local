@@ -34,7 +34,7 @@
     ],
     "extraResources": [
       {
-        "from": "../plantuml-master/build/libs",
+        "from": "vendor/plantuml",
         "to": "plantuml",
         "filter": [
           "plantuml-*.jar"
@@ -48,7 +48,7 @@
         ]
       },
       {
-        "from": "../PlantUML-Agent-Knowledge-Base.md",
+        "from": "vendor/kb",
         "to": "kb",
         "filter": [
           "PlantUML-Agent-Knowledge-Base.md"

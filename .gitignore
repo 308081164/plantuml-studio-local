@@ -5,3 +5,7 @@ dist/
 vendor/jre/
 vendor/_jre_extract/
 vendor/*.zip
+vendor/plantuml/plantuml-*.jar
+!vendor/plantuml/
+!vendor/kb/
+!vendor/kb/*
