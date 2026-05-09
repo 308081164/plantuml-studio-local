@@ -1,0 +1,41 @@
+{
+  "name": "uml-master-license-gui",
+  "version": "1.0.0",
+  "private": true,
+  "description": "UML 大师 / PlantUML 本地工作室 — 激活码管理（图形界面）",
+  "type": "module",
+  "main": "electron-main.mjs",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --win --x64"
+  },
+  "build": {
+    "appId": "com.uml_master.license-admin-gui",
+    "productName": "UML大师激活码管理",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron-main.mjs",
+      "preload.cjs",
+      "renderer/**/*",
+      {
+        "from": "../scripts/license-common.mjs",
+        "to": "license-common.mjs"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ]
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  }
+}

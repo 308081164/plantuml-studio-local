@@ -1,7 +1,13 @@
 node_modules/
-release/
 dist/
 *.log
+
+# Electron / electron-builder 输出（勿提交大二进制与解包目录）
+release/
+release_new/
+release_build*/
+release_v2*/
+
 vendor/jre/
 vendor/_jre_extract/
 vendor/*.zip
@@ -9,3 +15,18 @@ vendor/plantuml/plantuml-*.jar
 !vendor/plantuml/
 !vendor/kb/
 !vendor/kb/*
+
+# 发行方 Ed25519 私钥（与 scripts/license-common.mjs 内置公钥成对；切勿提交）
+admin-tool/.issuer-private.der
+admin-tool/.issuer-public.der
+admin-tool/embedded-public-hex.txt
+
+# 激活码管理 GUI 子工程
+admin-tool-gui/node_modules/
+admin-tool-gui/release/
+
+# 临时 / 调试文件（勿提交）
+electron-main.cjs
+convert.mjs
+test-*.mjs
+test*.txt

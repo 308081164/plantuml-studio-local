@@ -7,10 +7,18 @@
  * - 方案 B（对称 HMAC）用于激活设备码生成与校验
  * - Ed25519 签名用于软件激活码
  *
- * 注意：本模块不包含管理员私钥（SK_issuer），仅含客户端公钥与对称材料。
+ * 注意：本模块不包含管理员私钥（SK_issuer）；客户端内置发行方公钥（可经 UML_MASTER_PUBKEY 覆盖）。
  */
 
-import { createHash, createHmac, generateKeyPairSync, sign, verify } from 'node:crypto';
+import {
+  createHash,
+  createHmac,
+  createPrivateKey,
+  createPublicKey,
+  generateKeyPairSync,
+  sign,
+  verify,
+} from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
@@ -24,7 +32,7 @@ export const PRODUCT_ID = 'UML-MASTER';
 export const PRODUCT_LAYOUT = '2';
 
 /** 激活设备码 HMAC 密钥（对称，客户端混淆存放；管理员工具持有相同密钥） */
-// 注意：生产环境应使用代码混淆/白盒加密保护此密钥
+// 注意：对称密钥无法在向用户分发的客户端中真正隐藏，仅用于设备码一致性校验与防误输
 const K_REQ_HEX = '756d6c2d6d61737465722d61637469766174696f6e2d6b65792d7631';
 const K_REQ = Buffer.from(K_REQ_HEX, 'hex');
 
@@ -34,10 +42,34 @@ const DEVICE_CODE_LENGTH = 28;
 /** 许可证文件名称（存储在用户数据目录） */
 const LICENSE_FILE_NAME = 'studio-license.json';
 
-/** 客户端公钥（Ed25519），用于验证软件激活码签名 */
-// 生产环境：由管理员工具首次运行时生成，此处为占位公钥
-// 实际部署时，应将管理员工具生成的公钥替换此处
-const CLIENT_PUBLIC_KEY_HEX = process.env.UML_MASTER_PUBKEY || '';
+/**
+ * 内置发行方 Ed25519 公钥（SPKI DER 十六进制）。
+ * 与 `admin-tool/.issuer-private.der` 成对；私钥不入库，见 admin-tool 目录说明。
+ * 开发环境可通过环境变量 UML_MASTER_PUBKEY（hex）覆盖以使用独立密钥对。
+ */
+export const EMBEDDED_ISSUER_PUBLIC_KEY_HEX =
+  '302a300506032b65700321000504e8b0895a18b541891b093991f116d759b992a2f0357bc891dacc619aefe3';
+
+/**
+ * 解析用于激活码验签的公钥 Buffer（SPKI DER）。
+ * 优先使用环境变量 UML_MASTER_PUBKEY（便于开发/CI），否则使用内置公钥。
+ * @returns {Buffer|null}
+ */
+export function resolveIssuerPublicKeyBuffer() {
+  const envHex =
+    typeof process !== 'undefined' && process.env && typeof process.env.UML_MASTER_PUBKEY === 'string'
+      ? process.env.UML_MASTER_PUBKEY.trim()
+      : '';
+  const hex = envHex || EMBEDDED_ISSUER_PUBLIC_KEY_HEX || '';
+  if (!hex) return null;
+  try {
+    const buf = Buffer.from(hex, 'hex');
+    if (buf.length < 16) return null;
+    return buf;
+  } catch {
+    return null;
+  }
+}
 
 /* ============================================================
  * 设备指纹（HW_ID）
@@ -319,12 +351,12 @@ export function verifyLicenseSignature(parsed, publicKey) {
   }
 
   if (!publicKey || publicKey.length === 0) {
-    // 无公钥时跳过签名验证（开发/调试模式）
-    return { valid: true, warning: '无公钥配置，跳过签名验证' };
+    return { valid: false, error: '缺少发行方公钥，无法验证激活码签名' };
   }
 
   try {
-    const isVerified = verify(null, Buffer.from(parsed.payloadJson), publicKey, parsed.signature);
+    const pubKeyObj = createPublicKey({ key: publicKey, format: 'der', type: 'spki' });
+    const isVerified = verify(null, Buffer.from(parsed.payloadJson), pubKeyObj, parsed.signature);
     if (!isVerified) {
       return { valid: false, error: '激活码签名验证失败' };
     }
@@ -360,12 +392,13 @@ export function validateLicenseCode(licenseCode, hwId, publicKey) {
     return { ok: false, error: '激活码与当前设备不匹配' };
   }
 
-  // 4. 验证签名
-  if (publicKey && publicKey.length > 0) {
-    const sigResult = verifyLicenseSignature(parsed, publicKey);
-    if (!sigResult.valid) {
-      return { ok: false, error: sigResult.error };
-    }
+  // 4. 验证签名（必须配置公钥；无公钥则拒绝激活）
+  if (!publicKey || publicKey.length === 0) {
+    return { ok: false, error: '客户端缺少发行方公钥，无法接受激活码' };
+  }
+  const sigResult = verifyLicenseSignature(parsed, publicKey);
+  if (!sigResult.valid) {
+    return { ok: false, error: sigResult.error };
   }
 
   // 5. 验证有效期
@@ -434,12 +467,41 @@ export function writeLicense(userDataPath, licenseData) {
 /**
  * 检查许可证状态
  * @param {string} userDataPath
+ * @param {{ hwId?: string, publicKey?: Buffer } | null} [verificationContext] - 传入时将对磁盘上的 `license_code` 重新验签，防篡改
  * @returns {{ activated: boolean, licenseMode?: string, payload?: object, error?: string }}
  */
-export function checkLicenseStatus(userDataPath) {
+export function checkLicenseStatus(userDataPath, verificationContext = null) {
   const license = readLicense(userDataPath);
   if (!license) {
     return { activated: false, error: '未激活' };
+  }
+
+  if (license.deactivated === true) {
+    return { activated: false, error: '授权已卸载', payload: license };
+  }
+
+  const hwId = verificationContext?.hwId;
+  const publicKey = verificationContext?.publicKey;
+
+  if (!hwId || !publicKey || !publicKey.length) {
+    return { activated: false, error: '无法校验授权状态（缺少校验上下文）。', payload: license };
+  }
+
+  const storedCode = typeof license.license_code === 'string' ? license.license_code.trim() : '';
+  if (!storedCode) {
+    return {
+      activated: false,
+      error: '许可证缺少签名字段，请重新在「授权激活」中输入激活码。',
+      payload: license,
+    };
+  }
+  const v = validateLicenseCode(storedCode, hwId, publicKey);
+  if (!v.ok) {
+    return {
+      activated: false,
+      error: `许可证无效或已被篡改：${v.error}`,
+      payload: license,
+    };
   }
 
   // 检查是否过期（限时型）
@@ -496,7 +558,11 @@ export function generateKeyPair() {
  */
 export function signPayload(payloadJson, privateKey) {
   try {
-    return sign(null, Buffer.from(payloadJson), privateKey);
+    const keyObj =
+      Buffer.isBuffer(privateKey) || typeof privateKey === 'string'
+        ? createPrivateKey({ key: privateKey, format: 'der', type: 'pkcs8' })
+        : privateKey;
+    return sign(null, Buffer.from(payloadJson), keyObj);
   } catch (e) {
     throw new Error(`签名失败: ${e.message}`);
   }

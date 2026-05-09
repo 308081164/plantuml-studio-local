@@ -42,11 +42,19 @@ function adminDataDir() {
   return join(home, '.uml-master-admin');
 }
 
+/** 仓库内开发用私钥（与客户端内置公钥成对）；不入库，见 .gitignore */
+function repoLocalPrivateKeyPath() {
+  return join(__dirname, '.issuer-private.der');
+}
+
 function privateKeyPath() {
+  if (existsSync(repoLocalPrivateKeyPath())) return repoLocalPrivateKeyPath();
   return join(adminDataDir(), 'ed25519-private.der');
 }
 
 function publicKeyPath() {
+  const localPub = join(__dirname, '.issuer-public.der');
+  if (existsSync(localPub)) return localPub;
   return join(adminDataDir(), 'ed25519-public.der');
 }
 
@@ -100,7 +108,7 @@ async function cmdInitKeys() {
   console.log(`   私钥: ${privateKeyPath()}`);
   console.log(`   公钥: ${publicKeyPath()}`);
   console.log(`   公钥(Hex): ${publicKeyHexPath()}`);
-  console.log(`\n📋 请将以下公钥 Hex 配置到客户端环境变量 UML_MASTER_PUBKEY：`);
+  console.log(`\n📋 客户端已内置公钥时无需再配环境变量；若使用独立密钥对，可将以下 Hex 写入 UML_MASTER_PUBKEY 覆盖内置值：`);
   console.log(`\n   ${pubHex}\n`);
 
   console.log('⚠️  请妥善保管私钥文件！私钥泄露后，任何人可签发激活码。');
@@ -313,6 +321,9 @@ UML 大师 — 管理员激活码生成工具
   verify       验证软件激活码
   device-code  根据设备信息生成激活设备码（调试用）
   help         显示此帮助信息
+
+图形界面（推荐）:
+  cd ../admin-tool-gui && npm install && npm start
 
 示例:
   node admin-cli.mjs init-keys

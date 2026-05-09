@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UML大师激活码管理</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="top">
+      <h1>UML大师 · 激活码管理</h1>
+      <p class="sub">图形化签发 / 验证（私钥仅存本机，勿分发）</p>
+    </header>
+
+    <nav class="tabs" role="tablist">
+      <button type="button" class="tab tab--active" data-tab="keys">密钥</button>
+      <button type="button" class="tab" data-tab="gen">生成激活码</button>
+      <button type="button" class="tab" data-tab="verify">验证激活码</button>
+      <button type="button" class="tab" data-tab="device">设备码工具</button>
+    </nav>
+
+    <main>
+      <section id="panel-keys" class="panel panel--active">
+        <h2>Ed25519 密钥对</h2>
+        <p class="hint">与客户端 <code>license-common.mjs</code> 内置公钥须一致；私钥勿提交 Git。</p>
+        <div id="key-status" class="status-box">正在读取密钥状态…</div>
+        <label class="check"><input type="checkbox" id="init-overwrite" /> 覆盖已有密钥（危险）</label>
+        <div class="row">
+          <button type="button" id="btn-init-keys" class="primary">生成新密钥对</button>
+          <button type="button" id="btn-refresh-keys">刷新状态</button>
+        </div>
+        <pre id="init-result" class="result hidden"></pre>
+      </section>
+
+      <section id="panel-gen" class="panel">
+        <h2>生成软件激活码</h2>
+        <div class="grid">
+          <label>激活设备码 <span class="req">*</span></label>
+          <input type="text" id="gen-device-code" placeholder="用户从客户端「授权激活」复制" autocomplete="off" />
+
+          <label>HW_ID（设备指纹）<span class="req">*</span></label>
+          <input type="text" id="gen-hw-id" placeholder="64 位十六进制，与设备码对应" autocomplete="off" />
+
+          <label>授权类型</label>
+          <div class="inline">
+            <label class="radio"><input type="radio" name="license-mode" value="time_limited" checked /> 限时</label>
+            <label class="radio"><input type="radio" name="license-mode" value="permanent" /> 永久（首激窗口）</label>
+          </div>
+
+          <label>签发日期</label>
+          <input type="date" id="gen-issued-at" />
+
+          <label id="lbl-activate-before" class="hidden">首激截止日期</label>
+          <input type="date" id="gen-activate-before" class="hidden" />
+
+          <label id="lbl-valid-days">有效天数（限时）</label>
+          <input type="number" id="gen-valid-days" min="1" max="36500" value="30" />
+
+          <label>批次号（可选）</label>
+          <input type="text" id="gen-batch" />
+
+          <label>客户标识（可选）</label>
+          <input type="text" id="gen-customer" />
+        </div>
+        <div class="row">
+          <button type="button" id="btn-generate" class="primary">生成激活码</button>
+          <button type="button" id="btn-copy-code" disabled>复制激活码</button>
+          <button type="button" id="btn-save-code" disabled>保存到文件…</button>
+        </div>
+        <textarea id="gen-output" class="mono" rows="6" readonly placeholder="生成结果将显示在此"></textarea>
+        <pre id="gen-error" class="error hidden"></pre>
+      </section>
+
+      <section id="panel-verify" class="panel">
+        <h2>验证激活码</h2>
+        <textarea id="verify-input" class="mono" rows="5" placeholder="粘贴完整 v1.xxx.yyy 激活码"></textarea>
+        <div class="row">
+          <button type="button" id="btn-verify" class="primary">解析并验签</button>
+        </div>
+        <pre id="verify-result" class="result hidden"></pre>
+      </section>
+
+      <section id="panel-device" class="panel">
+        <h2>根据设备信息生成 HW_ID / 激活设备码</h2>
+        <p class="hint">与主进程采集字段一致时可复现客户端展示的设备码（调试用）。</p>
+        <div class="grid">
+          <label>MachineGuid</label>
+          <input type="text" id="dev-machine-guid" placeholder="Windows 注册表 MachineGuid" />
+          <label>CPU ID</label>
+          <input type="text" id="dev-cpu" placeholder="可选" />
+          <label>磁盘序列号</label>
+          <input type="text" id="dev-disk" placeholder="vol C:" />
+          <label>MAC</label>
+          <input type="text" id="dev-mac" placeholder="网卡 MAC" />
+        </div>
+        <div class="row">
+          <button type="button" id="btn-device-calc" class="primary">计算</button>
+        </div>
+        <pre id="device-result" class="result hidden"></pre>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>

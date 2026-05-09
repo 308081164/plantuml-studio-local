@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, dialog, clipboard, nativeImage, session } from 'electron';
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 import {
   existsSync,
   readdirSync,
@@ -24,6 +24,7 @@ import {
   checkLicenseStatus,
   getLicensePath,
   shortHwId,
+  resolveIssuerPublicKeyBuffer,
 } from './scripts/license-common.mjs';
 import {
   buildProjectSummary,
@@ -49,6 +50,16 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow = null;
 let javaChild = null;
 let apiBase = null;
+
+/** 用户已确认退出（避免重复弹窗 / 与 before-quit 二次进入配合） */
+let exitConfirmed = false;
+/** 致命错误等路径：不弹退出确认，直接退出 */
+let skipExitConfirmOnce = false;
+
+function quitAppWithoutConfirm() {
+  skipExitConfirmOnce = true;
+  app.quit();
+}
 
 const DEFAULT_AGENT = {
   apiKey: '',
@@ -815,7 +826,7 @@ async function startPicoWeb() {
       '未找到 PlantUML JAR',
       '安装包中应包含 plantuml JAR。开发环境请将 plantuml-master 执行 Gradle 打出 JAR，\n或设置环境变量 PLANTUML_JAR。'
     );
-    app.quit();
+    quitAppWithoutConfirm();
     return;
   }
 
@@ -871,16 +882,61 @@ async function startPicoWeb() {
   });
 }
 
+/**
+ * 停止 PlantUML PicoWeb（Java）子进程。
+ * Windows 上使用 taskkill /T /F 结束进程树，避免残留占用文件句柄导致后续 electron-builder 失败。
+ */
 function stopPicoWeb() {
-  if (javaChild && !javaChild.killed) {
-    try {
-      javaChild.kill('SIGTERM');
-    } catch {
-      /* ignore */
-    }
-  }
+  const child = javaChild;
   javaChild = null;
   apiBase = null;
+  if (!child || child.killed) return;
+  const pid = child.pid;
+  try {
+    if (process.platform === 'win32' && pid) {
+      try {
+        execSync(`taskkill /PID ${pid} /T /F`, { windowsHide: true, stdio: 'ignore', timeout: 12000 });
+      } catch {
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          /* ignore */
+        }
+      }
+    } else {
+      try {
+        child.kill('SIGTERM');
+      } catch {
+        /* ignore */
+      }
+      setTimeout(() => {
+        try {
+          if (child && !child.killed) child.kill('SIGKILL');
+        } catch {
+          /* ignore */
+        }
+      }, 2500);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function showExitConfirmDialog() {
+  const parent =
+    (mainWindow && !mainWindow.isDestroyed() && mainWindow) ||
+    BrowserWindow.getFocusedWindow() ||
+    BrowserWindow.getAllWindows().find((w) => !w.isDestroyed());
+  return dialog.showMessageBox(parent && !parent.isDestroyed() ? parent : undefined, {
+    type: 'question',
+    buttons: ['退出', '取消'],
+    defaultId: 0,
+    cancelId: 1,
+    title: '确认退出',
+    message: '确定要退出 PlantUML 本地工作室吗？',
+    detail: '退出后将关闭内置预览服务并结束相关进程。',
+    noLink: true,
+  });
 }
 
 /* ---------- 产出物暂存区（用户目录持久化） ---------- */
@@ -1085,6 +1141,8 @@ function registerIpcHandlers() {
 
   ipcMain.handle('studio:agent-run', async (_e, { userText }) => {
     try {
+      const gate = assertLicensedOrError();
+      if (gate) return { ...gate, logs: [gate.error] };
       const text = String(userText || '').trim();
       if (!text) return { ok: false, error: '请输入自然语言需求', logs: [] };
       return await runAgentPipeline(text);
@@ -1106,6 +1164,8 @@ function registerIpcHandlers() {
 
   ipcMain.handle('studio:project-summary', async (_e, { rootPath }) => {
     try {
+      const gate = assertLicensedOrError();
+      if (gate) return gate;
       const { summary, stats } = buildProjectSummary(String(rootPath || '').trim());
       return { ok: true, summary, stats };
     } catch (e) {
@@ -1116,6 +1176,8 @@ function registerIpcHandlers() {
   /** 不调用 DeepSeek：按当前忽略规则 + 启发式选文件，粗算首轮将发送的 tokens */
   ipcMain.handle('studio:project-context-estimate', async (_e, { rootPath, userSample, ignoreGlobsText }) => {
     try {
+      const gate = assertLicensedOrError();
+      if (gate) return gate;
       const root = String(rootPath || '').trim();
       if (!root) return { ok: false, error: '未选择项目目录' };
       const cfg = loadAgentConfig();
@@ -1157,6 +1219,8 @@ function registerIpcHandlers() {
 
   ipcMain.handle('studio:agent-run-project', async (_e, { userText, projectRoot, ignoreGlobsText }) => {
     try {
+      const gate = assertLicensedOrError();
+      if (gate) return { ...gate, logs: [gate.error] };
       const text = String(userText || '').trim();
       if (!text) return { ok: false, error: '请填写「自然语言需求」作为制图目标', logs: [] };
       return await runAgentPipelineWithProject(text, projectRoot, ignoreGlobsText);
@@ -1310,7 +1374,6 @@ function registerIpcHandlers() {
     const info = {};
     try {
       // Windows MachineGuid
-      const { execSync } = require('node:child_process');
       try {
         const regOut = execSync(
           'reg query "HKLM\\SOFTWARE\\Microsoft\\Cryptography" /v MachineGuid',
@@ -1340,6 +1403,26 @@ function registerIpcHandlers() {
     return info;
   }
 
+  function getLicenseVerificationContext() {
+    const publicKey = resolveIssuerPublicKeyBuffer();
+    if (!publicKey || !publicKey.length) return null;
+    const devInfo = collectDeviceInfo();
+    const hwId = generateHwId(devInfo);
+    return { hwId, publicKey };
+  }
+
+  function assertLicensedOrError() {
+    const ctx = getLicenseVerificationContext();
+    if (!ctx) {
+      return { ok: false, error: '内部错误：未配置发行方公钥，无法完成授权校验。' };
+    }
+    const st = checkLicenseStatus(app.getPath('userData'), ctx);
+    if (!st.activated) {
+      return { ok: false, error: st.error || '请先完成软件授权激活后再使用此功能。' };
+    }
+    return null;
+  }
+
   ipcMain.handle('studio:license-get-device-info', () => {
     try {
       const devInfo = collectDeviceInfo();
@@ -1359,7 +1442,8 @@ function registerIpcHandlers() {
 
   ipcMain.handle('studio:license-get-status', () => {
     try {
-      const status = checkLicenseStatus(app.getPath('userData'));
+      const ctx = getLicenseVerificationContext();
+      const status = checkLicenseStatus(app.getPath('userData'), ctx);
       return { ok: true, ...status };
     } catch (e) {
       return { ok: false, error: String(e.message || e) };
@@ -1375,18 +1459,12 @@ function registerIpcHandlers() {
       const devInfo = collectDeviceInfo();
       const hwId = generateHwId(devInfo);
 
-      // 获取公钥（从环境变量或内置）
-      const pubKeyHex = process.env.UML_MASTER_PUBKEY || '';
-      let publicKey = null;
-      if (pubKeyHex) {
-        try {
-          publicKey = Buffer.from(pubKeyHex, 'hex');
-        } catch {
-          return { ok: false, error: '内置公钥配置异常，请联系管理员' };
-        }
+      const publicKey = resolveIssuerPublicKeyBuffer();
+      if (!publicKey || !publicKey.length) {
+        return { ok: false, error: '客户端未配置发行方公钥，无法接受激活。' };
       }
 
-      // 校验激活码
+      // 校验激活码（含 Ed25519 签名）
       const result = validateLicenseCode(code, hwId, publicKey);
       if (!result.ok) {
         return { ok: false, error: result.error };
@@ -1395,6 +1473,7 @@ function registerIpcHandlers() {
       // 持久化存储许可证
       const licenseData = {
         ...result.payload,
+        license_code: code,
         activated_at: new Date().toISOString(),
         license_code_prefix: code.slice(0, 20) + '…',
       };
@@ -1428,7 +1507,7 @@ async function createWindow() {
     if (!apiBase) await startPicoWeb();
   } catch (e) {
     await dialog.showErrorBox('无法启动 PlantUML 服务', String(e.message || e));
-    app.quit();
+    quitAppWithoutConfirm();
     return;
   }
 
@@ -1451,8 +1530,23 @@ async function createWindow() {
 
   await mainWindow.loadFile(join(__dirname, 'renderer', 'index.html'));
 
+  mainWindow.on('close', (e) => {
+    if (skipExitConfirmOnce || exitConfirmed) {
+      stopPicoWeb();
+      return;
+    }
+    e.preventDefault();
+    void showExitConfirmDialog().then(({ response }) => {
+      if (response !== 0) return;
+      exitConfirmed = true;
+      stopPicoWeb();
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
+    });
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
+    if (process.platform === 'darwin') exitConfirmed = false;
   });
 }
 
@@ -1481,8 +1575,18 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-app.on('before-quit', () => {
-  stopPicoWeb();
+app.on('before-quit', (e) => {
+  if (skipExitConfirmOnce || exitConfirmed) {
+    stopPicoWeb();
+    return;
+  }
+  e.preventDefault();
+  void showExitConfirmDialog().then(({ response }) => {
+    if (response !== 0) return;
+    exitConfirmed = true;
+    stopPicoWeb();
+    app.quit();
+  });
 });
 
 app.on('activate', () => {
