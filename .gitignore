@@ -2,6 +2,19 @@ node_modules/
 dist/
 *.log
 
+# 操作系统与编辑器杂项
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+
+# 本地环境（勿提交密钥与机器相关配置）
+.env
+.env.*
+!.env.example
+
 # Electron / electron-builder 输出（勿提交大二进制与解包目录）
 release/
 release_new/
@@ -24,6 +37,13 @@ admin-tool/embedded-public-hex.txt
 # 激活码管理 GUI 子工程
 admin-tool-gui/node_modules/
 admin-tool-gui/release/
+admin-tool-gui/dist/
+admin-tool-gui/out/
+
+# 误生成的密钥/证书（除已声明的 admin-tool/.issuer-* 外）
+*.pem
+*.p12
+*.pfx
 
 # 临时 / 调试文件（勿提交）
 electron-main.cjs
