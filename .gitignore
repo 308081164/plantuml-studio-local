@@ -18,6 +18,7 @@ Desktop.ini
 # Electron / electron-builder 输出（统一目录名 releases；下列含历史目录名以免误提交残留）
 releases/
 releases_fresh/
+releases_repack/
 release/
 release_new/
 release_build*/
