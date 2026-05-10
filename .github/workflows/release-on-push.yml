@@ -74,6 +74,7 @@ jobs:
           name: v${{ env.NEW_VERSION }}
           generate_release_notes: true
           prerelease: ${{ contains(env.NEW_VERSION, '-') }}
+          fail_on_unmatched_files: false
           files: |
             releases/*.exe
             releases/*.blockmap
