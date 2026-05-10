@@ -1,0 +1,79 @@
+# 推送至 main/master 时：补丁版本 +1 → 提交 [skip ci] → 打 tag → 构建 Windows 安装包 → 发布到 GitHub Releases
+# 构建产物目录与本地一致：releases/（安装包与便携版 .exe 一并上传）
+
+name: Release on push
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' ||
+      (github.event.head_commit != null &&
+      !contains(github.event.head_commit.message, '[skip ci]') &&
+      !contains(github.event.head_commit.message, '[ci skip]')) }}
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Bump patch version
+        shell: bash
+        run: |
+          set -e
+          V=$(node scripts/ci-bump-version.mjs)
+          echo "NEW_VERSION=$V" >> "$GITHUB_ENV"
+          echo "Bumped to $V"
+
+      - name: Commit version bump and tag
+        shell: bash
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "chore(release): v${NEW_VERSION} [skip ci]"
+          git tag -a "v${NEW_VERSION}" -m "Release v${NEW_VERSION}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git push origin "refs/tags/v${NEW_VERSION}"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare JRE
+        run: npm run prepare:jre
+
+      - name: Build Windows installers
+        run: npx electron-builder --win --x64
+
+      - name: Upload to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.NEW_VERSION }}
+          name: v${{ env.NEW_VERSION }}
+          generate_release_notes: true
+          prerelease: ${{ contains(env.NEW_VERSION, '-') }}
+          files: |
+            releases/*.exe
+            releases/*.blockmap
