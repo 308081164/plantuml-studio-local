@@ -1256,7 +1256,12 @@ function registerIpcHandlers() {
 
   ipcMain.handle('studio:agent-config-get', () => loadAgentConfig());
 
-  ipcMain.handle('studio:agent-config-set', (_e, partial) => saveAgentConfig(partial || {}));
+  ipcMain.handle('studio:agent-config-set', (_e, partial) => {
+    const gate = assertLicensedOrError();
+    if (gate) return { ok: false, error: gate.error };
+    const next = saveAgentConfig(partial || {});
+    return { ok: true, config: next };
+  });
 
   ipcMain.handle('studio:error-archive-append', (_e, payload) => {
     try {
@@ -1293,6 +1298,8 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle('studio:pick-project-directory', async () => {
+    const gate = assertLicensedOrError();
+    if (gate) return { ok: false, canceled: false, error: gate.error };
     const win = BrowserWindow.getFocusedWindow() || mainWindow;
     const r = await dialog.showOpenDialog(win || undefined, {
       properties: ['openDirectory'],
@@ -1333,6 +1340,8 @@ function registerIpcHandlers() {
         manifestTruncated: manifest.files.length > 2200,
         skippedSecrets: manifest.stats.skippedSecrets,
         plannerRationale: '',
+        diagramGuess: '',
+        riskNotes: '',
         shortTree: manifest.shortTreeLines,
       });
       let budgetChars = computeBundleCharBudget(`${header}\n`, footer);
@@ -1370,10 +1379,16 @@ function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle('studio:stash-list', () => buildStashListPayload());
+  ipcMain.handle('studio:stash-list', () => {
+    const gate = assertLicensedOrError();
+    if (gate) return { ok: false, error: gate.error, items: [] };
+    return buildStashListPayload();
+  });
 
   ipcMain.handle('studio:stash-add', (_e, payload) => {
     try {
+      const gate = assertLicensedOrError();
+      if (gate) return gate;
       const kind = payload?.kind === 'svg' ? 'svg' : 'png';
       const id = randomUUID();
       ensureStashDirs();
@@ -1430,6 +1445,8 @@ function registerIpcHandlers() {
 
   ipcMain.handle('studio:stash-remove', (_e, { ids }) => {
     try {
+      const gate = assertLicensedOrError();
+      if (gate) return gate;
       const idSet = new Set((Array.isArray(ids) ? ids : []).map(String).filter(Boolean));
       if (!idSet.size) return { ok: false, error: '未选择条目' };
       const kept = readStashManifest().filter((m) => {
@@ -1448,6 +1465,8 @@ function registerIpcHandlers() {
 
   ipcMain.handle('studio:stash-get-full', (_e, { id }) => {
     try {
+      const gate = assertLicensedOrError();
+      if (gate) return gate;
       const sid = String(id || '');
       if (!sid) return { ok: false, error: '缺少 id' };
       const items = readStashManifest();
@@ -1482,6 +1501,8 @@ function registerIpcHandlers() {
 
   ipcMain.handle('studio:stash-copy', (_e, { id }) => {
     try {
+      const gate = assertLicensedOrError();
+      if (gate) return gate;
       const sid = String(id || '');
       const items = readStashManifest();
       const meta = items.find((x) => x.id === sid);

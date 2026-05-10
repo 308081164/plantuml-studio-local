@@ -444,6 +444,17 @@ async function addCurrentToStashWithFolder() {
 async function refreshStashList() {
   if (!window.studio?.stashList) return;
   const r = await window.studio.stashList();
+  if (!r?.ok) {
+    stashFolders = [];
+    const items = [];
+    $('stash-count').textContent = '0 项';
+    const tree = $('stash-tree');
+    const empty = $('stash-empty');
+    empty.classList.remove('hidden');
+    tree.classList.add('hidden');
+    tree.innerHTML = '';
+    return;
+  }
   const items = r.items || [];
   stashFolders = r.folders || [];
   
@@ -945,7 +956,7 @@ async function loadAgentForm() {
 async function saveAgentForm() {
   if (!window.studio?.setAgentConfig) return;
   try {
-    await window.studio.setAgentConfig({
+    const r = await window.studio.setAgentConfig({
       apiKey: $('cfg-api-key').value,
       baseUrl: $('cfg-base-url').value,
       model: $('cfg-model').value,
@@ -953,6 +964,10 @@ async function saveAgentForm() {
       projectIgnoreGlobs: projectIgnoreGlobsValue(),
       chinaUnivMode: isChinaUnivMode,
     });
+    if (r && r.ok === false) {
+      setStatus(r.error || '未授权：请先在菜单「帮助 → 授权激活」中完成激活后再保存。', false);
+      return;
+    }
     closeAgentSettingsDialog();
     setStatus('已保存 API 与编排设置', true);
   } catch (e) {
@@ -961,10 +976,23 @@ async function saveAgentForm() {
 }
 
 function onChinaUnivModeToggle() {
-  isChinaUnivMode = $('china-univ-mode').checked;
+  const next = $('china-univ-mode').checked;
   if (window.studio?.setAgentConfig) {
-    window.studio.setAgentConfig({ chinaUnivMode: isChinaUnivMode }).catch(() => {});
+    window.studio.setAgentConfig({ chinaUnivMode: next }).then((r) => {
+      if (r && r.ok === false) {
+        $('china-univ-mode').checked = !next;
+        setStatus(r.error || '未授权：无法保存国内高校模式开关。', false);
+        return;
+      }
+      isChinaUnivMode = next;
+      if (isChinaUnivMode && $('source').value === DEFAULT_SOURCE) {
+        $('source').value = CHINA_UNIV_DEFAULT_SOURCE;
+      }
+      setStatus(isChinaUnivMode ? '国内高校模式已开启' : '国内高校模式已关闭', true);
+    });
+    return;
   }
+  isChinaUnivMode = next;
   if (isChinaUnivMode && $('source').value === DEFAULT_SOURCE) {
     $('source').value = CHINA_UNIV_DEFAULT_SOURCE;
   }
@@ -1027,12 +1055,19 @@ async function pickProjectDirectory() {
   if (!window.studio?.pickProjectDirectory) return;
   const r = await window.studio.pickProjectDirectory();
   if (r.canceled) return;
-  if (!r?.ok || !r.path) return;
+  if (!r?.ok) {
+    setStatus(r?.error || '无法选择项目目录：请先完成软件授权激活。', false);
+    return;
+  }
+  if (!r.path) return;
   selectedProjectRoot = r.path;
   const pr = $('project-root-display');
   if (pr) pr.value = r.path;
   if (window.studio.setAgentConfig) {
-    await window.studio.setAgentConfig({ lastProjectRoot: r.path });
+    const sr = await window.studio.setAgentConfig({ lastProjectRoot: r.path });
+    if (sr && sr.ok === false) {
+      setStatus(sr.error || '已选目录，但未授权无法保存到配置。', false);
+    }
   }
   openProjectImportedDialog(r.path);
 }
@@ -1139,7 +1174,11 @@ function wireAppDialogs() {
   $('agent-advanced-close-btn')?.addEventListener('click', () => closeAgentAdvancedDialog());
   $('btn-agent-advanced-save')?.addEventListener('click', async () => {
     if (window.studio?.setAgentConfig) {
-      await window.studio.setAgentConfig({ projectIgnoreGlobs: projectIgnoreGlobsValue() });
+      const r = await window.studio.setAgentConfig({ projectIgnoreGlobs: projectIgnoreGlobsValue() });
+      if (r && r.ok === false) {
+        setStatus(r.error || '未授权：无法保存项目忽略规则。', false);
+        return;
+      }
       setStatus('已保存项目忽略规则', true);
     }
     closeAgentAdvancedDialog();
