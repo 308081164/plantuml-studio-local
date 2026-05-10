@@ -44,6 +44,8 @@ import {
   formatManifestJsonl,
   parsePlannerPaths,
 } from './scripts/project-context.mjs';
+import { classifyDiagramIntent, shouldApplyChinaUnivPostProcess } from './scripts/agent-intent.mjs';
+import { buildKnowledgeInjection, resolveJarLabelFromDirs } from './scripts/kb-inject.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -99,7 +101,7 @@ function loadAgentConfig() {
           : Array.isArray(j.projectIgnoreGlobs)
           ? j.projectIgnoreGlobs.map(String).join('\n')
           : '',
-      chinaUnivMode: typeof j.chinaUnivMode ? true : false,
+      chinaUnivMode: j.chinaUnivMode === true || j.chinaUnivMode === 'true',
     };
   } catch {
     return { ...DEFAULT_AGENT };
@@ -141,21 +143,28 @@ function findKnowledgeBasePath() {
   return null;
 }
 
-function readKnowledgeBaseSnippet(maxChars = 40000) {
-  const p = findKnowledgeBasePath();
-  if (!p) return '';
-  try {
-    const s = readFileSync(p, 'utf8');
-    return s.length <= maxChars ? s : `${s.slice(0, maxChars)}\n\n…（知识库已截断）`;
-  } catch {
-    return '';
-  }
+function resolvePlantumlJarLabelForPrompt() {
+  const vendorJar = join(__dirname, 'vendor', 'plantuml');
+  const resLibs = join(process.resourcesPath || '', 'plantuml');
+  return resolveJarLabelFromDirs([resLibs, vendorJar]);
 }
 
-function buildAgentSystemPrompt(kbSnippet, cfg) {
-  const kb = kbSnippet.trim();
+/**
+ * @param {{ l0: string, kbExcerpt: string, selectedTitles?: string[], intent?: string }} kbPayload
+ * @param {*} cfg
+ */
+function buildAgentSystemPrompt(kbPayload, cfg) {
+  const l0 = String(kbPayload?.l0 || '').trim();
+  const kbExcerpt = String(kbPayload?.kbExcerpt || '').trim();
+  const titles = Array.isArray(kbPayload?.selectedTitles) ? kbPayload.selectedTitles.filter(Boolean) : [];
+  const intentTag = kbPayload?.intent ? String(kbPayload.intent) : '';
+  const kbBlock =
+    kbExcerpt.length > 0
+      ? `\n【知识库摘录（非全文）】章节参考：${titles.length ? titles.join('、') : '自动路由'}；意图：${intentTag || 'n/a'}\n${kbExcerpt}`
+      : '';
   const chinaModeExtra = cfg.chinaUnivMode ? `
 ===== 【国内高校模式：强制输出规则】 =====
+【专规优先声明】本节覆盖与本节冲突的通用表述（例如通用规则中的「可用 note 写假设」：@startchen 与国内高校活动图专规不适用处，以本节为准）。
 1️⃣ 第一行必须是：@startuml activity
    ❌ 错误写法：@startuml（后面不加 activity 会报错）
    ✅ 正确写法：@startuml activity
@@ -325,7 +334,7 @@ function buildAgentSystemPrompt(kbSnippet, cfg) {
    :结束; <<task>>
    @enduml
 
-7️⃣ 完整示例参考（登录流程）：
+8️⃣ 完整示例参考（登录流程）：
 @startuml activity
 title 登录流程图（国内标准写法）
 skinparam ActivityShape roundedbox
@@ -370,17 +379,20 @@ endif
 直接输出 PlantUML 代码即可，不要任何 Markdown 解释或代码块包裹（除非你想，但代码块里的内容必须是完整 PlantUML）。
 ` : '';
   return [
+    l0,
     '你是 PlantUML 专家。用户会用自然语言描述要画的图。',
     '你必须只输出一段完整、可渲染的 PlantUML 源码，且必须包含 @startuml 与 @enduml（或当前任务要求的其它 @start...@end 对）。',
     '不要输出 Markdown 解释；若用代码块包裹，块内仍须是完整 PlantUML。',
-    '若信息不足，在图内用 note 简要列出假设，仍给出可渲染的一版。',
-    kb ? `\n下列为项目知识库摘录，请遵守其中的语法与约束：\n\n${kb}` : '',
+    '【规则优先级】通用规则允许「信息不足时在图内用 note 写假设」；若用户或任务要求 @startchen 或国内高校活动图专规，则以对应专规为准（Chen 严禁 note）。',
+    kbBlock,
     chinaModeExtra,
-  ].join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
-function buildAgentSystemPromptForProject(kbSnippet, cfg) {
-  return `${buildAgentSystemPrompt(kbSnippet, cfg)}\n\n【项目模式】用户会提供本地工程目录的索引与「规划阶段」选出的若干源文件全文（受控长度）。请结合这些内容制图；若仍有信息缺口，在图中用 note 标明假设与未读到的模块。`;
+function buildAgentSystemPromptForProject(kbPayload, cfg) {
+  return `${buildAgentSystemPrompt(kbPayload, cfg)}\n\n【项目模式】用户会提供本地工程目录的索引与「规划阶段」选出的若干源文件全文（受控长度）。请结合这些内容制图；若仍有信息缺口且非 @startchen，在图中用 note 标明假设与未读到的模块。`;
 }
 
 /** 附在 PlantUML 校验失败后的修正轮 user 消息中，针对高频语法坑（如 title 行内字面 \\n） */
@@ -391,8 +403,9 @@ const PROJECT_PLANNER_SYSTEM = [
   '你是资深软件架构分析助手。',
   '用户会给出「制图目标」和一份 JSONL 文件清单（每行一个 JSON：path, bytes, ext, head）。',
   '你必须只输出一个 JSON 对象，不要使用 markdown 代码围栏。',
-  'JSON 格式：{"paths":["相对路径1", ...], "rationale":"一句话说明为何选这些文件"}。',
+  'JSON 格式：{"paths":["相对路径1", ...], "rationale":"一句话说明为何选这些文件", "diagram_guess":"推断图种/意图（如 时序图/类图/活动图/Chen ER）", "risk_notes":"缺信息或易错点（可为空字符串）"}。',
   'paths 数组最多 35 个字符串，且每个必须原样来自清单中的 path 字段。',
+  'diagram_guess、risk_notes 为短字符串即可，勿写长文。',
   '优先选择能支撑用例图/类图/时序图/部署图推断的：入口、路由、领域模型、API、配置与依赖声明。',
 ].join('');
 
@@ -432,9 +445,13 @@ function extractPlantumlFromModelText(text) {
  * 3. 只替换完整独立的 start/stop（避免误伤）
  * 注意：@startchen 语法不需要转换，保持原样
  */
-function applyChinaUnivModeIfNeeded(source, cfg) {
+function applyChinaUnivModeIfNeeded(source, cfg, ctx = {}) {
   if (!cfg.chinaUnivMode) return source;
-  
+
+  const intent = ctx.intent || 'other';
+  const userText = String(ctx.userText || '');
+  if (!shouldApplyChinaUnivPostProcess(intent, userText)) return source;
+
   // @startchen 语法有自己的规则，不需要应用国内高校模式转换
   if (source.includes('@startchen')) {
     return source;
@@ -501,6 +518,67 @@ async function plantumlRenderCheck(source, options = ['-tpng']) {
   return { ok, buffer: buf, errText: errText || undefined };
 }
 
+async function plantumlRenderCheckWithOptionalSvg(source) {
+  const png = await plantumlRenderCheck(source, ['-tpng']);
+  const dual = process.env.UML_MASTER_DUAL_RENDER === '1' || process.env.UML_MASTER_DUAL_RENDER === 'true';
+  if (!png.ok) return { ...png, dualSvgSkipped: !dual };
+  if (!dual) return { ...png, dualSvgSkipped: true };
+  const svg = await plantumlRenderCheck(source, ['-tsvg']);
+  if (!svg.ok) {
+    return {
+      ...png,
+      dualSvgWarning: svg.errText || '未知',
+    };
+  }
+  return { ...png, dualSvgOk: true };
+}
+
+function extractApproxLineFromPlantumlErr(errText) {
+  const m = /line:\s*(\d+)/i.exec(String(errText || ''));
+  return m ? Number(m[1]) : null;
+}
+
+function sliceSourceNearLine(source, lineNo, contextLines = 20) {
+  if (!lineNo || lineNo < 1) return '';
+  const lines = String(source || '').split(/\r?\n/);
+  const i = lineNo - 1;
+  if (i < 0 || i >= lines.length) return '';
+  const from = Math.max(0, i - contextLines);
+  const to = Math.min(lines.length, i + contextLines + 1);
+  return lines.slice(from, to).map((l, idx) => `${from + idx + 1}: ${l}`).join('\n');
+}
+
+function foldSourceMiddle(source, maxHead = 4000, maxTail = 4000) {
+  const s = String(source || '');
+  if (s.length <= maxHead + maxTail + 120) return s;
+  const omitted = s.length - maxHead - maxTail;
+  return `${s.slice(0, maxHead)}\n\n/* …中间已省略约 ${omitted} 字符… */\n\n${s.slice(-maxTail)}`;
+}
+
+function buildAgentRetryUserContent({ isProject, round, lastErr, source, dupTail }) {
+  const head = isProject
+    ? '上一版源码经 PlantUML 校验未通过，请结合项目上下文修订后，再次输出完整源码（整段替换）。'
+    : '上一版源码经 PlantUML 校验未通过，请根据错误信息修订后，再次输出完整源码（整段替换）。';
+  const hint = PLANTUML_RETRY_HINT;
+  if (round < 2) {
+    return `${head}${hint}${dupTail}\n\n--- 错误 ---\n${lastErr}\n\n--- 当前源码 ---\n${source}`;
+  }
+  const lineNo = extractApproxLineFromPlantumlErr(lastErr);
+  const near = lineNo ? sliceSourceNearLine(source, lineNo, 22) : '';
+  const folded = foldSourceMiddle(source);
+  return `${head}${hint}${dupTail}
+
+--- 结构化错误摘要（本地） ---
+行号提示: ${lineNo ?? '未知'}；请优先修正该行附近语法。
+
+--- 错误原文 ---
+${lastErr}
+
+${near ? `--- 源码片段（错误行 ±N）---\n${near}\n` : ''}
+--- 完整源码（折叠参考；输出须为全新完整稿，勿只改片段）---
+${folded}`;
+}
+
 async function deepseekChat(config, messages, options = {}) {
   const base = config.baseUrl.replace(/\/$/, '');
   const url = `${base}/v1/chat/completions`;
@@ -546,8 +624,32 @@ async function deepseekChat(config, messages, options = {}) {
 async function runAgentPipeline(userText) {
   const cfg = loadAgentConfig();
   const logs = [];
-  const kb = readKnowledgeBaseSnippet();
-  const system = buildAgentSystemPrompt(kb, cfg);
+  const ut = String(userText || '');
+  const intent = classifyDiagramIntent(ut, cfg.chinaUnivMode);
+  const kbPath = findKnowledgeBasePath();
+  const inj = buildKnowledgeInjection({
+    kbPath: kbPath || '',
+    intent,
+    userText: ut,
+    maxChars: 40000,
+    jarLabel: resolvePlantumlJarLabelForPrompt(),
+  });
+  const kbPayload = {
+    l0: inj.l0,
+    kbExcerpt: inj.kbExcerpt,
+    selectedTitles: inj.selectedTitles,
+    intent,
+  };
+  const system = buildAgentSystemPrompt(kbPayload, cfg);
+  logs.push(
+    `[metrics] ${JSON.stringify({
+      mode: 'simple',
+      intent,
+      kbChars: inj.kbExcerpt.length,
+      kbFallback: inj.fallback,
+      kbTruncated: inj.truncated,
+    })}`
+  );
   const maxExtra = cfg.maxRetries;
   const maxRounds = 1 + maxExtra;
 
@@ -565,7 +667,7 @@ async function runAgentPipeline(userText) {
     const userContent =
       round === 0
         ? `用户需求：\n${userText}\n\n请输出完整可渲染的 PlantUML 源码。`
-        : `上一版源码经 PlantUML 校验未通过，请根据错误信息修订后，再次输出完整源码（整段替换）。${PLANTUML_RETRY_HINT}${dupTail}\n\n--- 错误 ---\n${lastErr}\n\n--- 当前源码 ---\n${source}`;
+        : buildAgentRetryUserContent({ isProject: false, round, lastErr, source, dupTail });
 
     const raw = await deepseekChat(
       cfg,
@@ -573,7 +675,7 @@ async function runAgentPipeline(userText) {
       { temperature: round > 0 ? 0.58 : 0.2 }
     );
     let extracted = extractPlantumlFromModelText(raw);
-    extracted = applyChinaUnivModeIfNeeded(extracted, cfg);
+    extracted = applyChinaUnivModeIfNeeded(extracted, cfg, { intent, userText: ut });
     if (round > 0 && extracted === lastExtracted && lastExtracted.length > 20) {
       noRepeatHint = true;
       logs.push(`第 ${round + 1} 轮：提取结果与上一轮完全相同（${extracted.length} 字符），下一轮将加重「禁止重复」提示并提高采样温度。`);
@@ -590,9 +692,13 @@ async function runAgentPipeline(userText) {
     }
 
     logs.push(`第 ${round + 1} 轮：已生成 ${source.length} 字符，正在本地 PlantUML 校验…`);
-    const { ok, errText } = await plantumlRenderCheck(source, ['-tpng']);
+    const { ok, errText, dualSvgOk, dualSvgWarning } = await plantumlRenderCheckWithOptionalSvg(source);
     if (ok) {
-      logs.push(`第 ${round + 1} 轮：校验通过`);
+      if (dualSvgWarning) logs.push(`第 ${round + 1} 轮：PNG 通过；可选 SVG 未通过（仅记录）：${dualSvgWarning}`);
+      logs.push(`第 ${round + 1} 轮：校验通过${dualSvgOk ? '（含可选 SVG）' : ''}`);
+      logs.push(
+        `[metrics] ${JSON.stringify({ mode: 'simple', roundOk: round + 1, dualSvgOk: Boolean(dualSvgOk), dualSvgWarning: Boolean(dualSvgWarning) })}`
+      );
       return { ok: true, source, logs };
     }
     lastErr = errText || '未知渲染错误';
@@ -632,7 +738,7 @@ async function runAgentPipelineWithProject(userText, projectRoot, ignoreGlobsTex
     manifestJsonl,
     manifestTruncated ? `\n… 另有约 ${Math.max(0, totalFiles - manifestLineCount)} 条未列出` : '',
     '',
-    '只输出 JSON：{"paths":[],"rationale":""}。paths 最多 35 项。勿使用 markdown 围栏。',
+    '只输出 JSON：{"paths":[],"rationale":"","diagram_guess":"","risk_notes":""}。paths 最多 35 项；后两字段可空字符串。勿使用 markdown 围栏。',
   ].join('\n');
 
   const logs = [
@@ -643,7 +749,10 @@ async function runAgentPipelineWithProject(userText, projectRoot, ignoreGlobsTex
 
   const validPaths = new Set(manifest.files.map((f) => f.path));
   let rationale = '';
+  let diagramGuess = '';
+  let riskNotes = '';
   let selectedPaths = [];
+  let plannerFallback = false;
 
   try {
     const plannerRaw = await deepseekChat(cfg, [
@@ -652,17 +761,27 @@ async function runAgentPipelineWithProject(userText, projectRoot, ignoreGlobsTex
     ]);
     const pr = parsePlannerPaths(plannerRaw);
     rationale = pr.rationale || '';
+    diagramGuess = pr.diagramGuess || '';
+    riskNotes = pr.riskNotes || '';
     selectedPaths = (pr.paths || []).filter((p) => validPaths.has(p)).slice(0, 35);
     logs.push(`规划阶段：模型选出 ${selectedPaths.length} 个文件路径。`);
+    if (!selectedPaths.length && (pr.paths || []).length > 0) {
+      logs.push('规划返回的路径均不在本地清单中，将回退启发式。');
+      plannerFallback = true;
+    }
   } catch (e) {
     logs.push(`规划阶段 DeepSeek 不可用或失败：${String(e.message || e)}；已改用本地启发式。`);
     selectedPaths = heuristicPrioritizedPaths(manifest.files, 35);
+    plannerFallback = true;
   }
 
   if (!selectedPaths.length) {
     selectedPaths = heuristicPrioritizedPaths(manifest.files, 35);
     logs.push('规划结果为空，已改用本地启发式选文件。');
+    plannerFallback = true;
   }
+
+  logs.push(`[metrics] ${JSON.stringify({ mode: 'project', plannerFallback })}`);
 
   const { header, footer } = buildProjectUserBlockParts({
     root,
@@ -671,6 +790,8 @@ async function runAgentPipelineWithProject(userText, projectRoot, ignoreGlobsTex
     manifestTruncated,
     skippedSecrets: manifest.stats.skippedSecrets,
     plannerRationale: rationale,
+    diagramGuess,
+    riskNotes,
     shortTree: manifest.shortTreeLines,
   });
 
@@ -694,8 +815,33 @@ async function runAgentPipelineWithProject(userText, projectRoot, ignoreGlobsTex
     `首轮用户消息粗算约 ${estimateTokens(firstUserBlock)} tokens（≈字符/${CHARS_PER_TOKEN_EST}）；正文含 ${bundle.usedPaths.length} 个文件。`
   );
 
-  const kb = readKnowledgeBaseSnippet();
-  const system = buildAgentSystemPromptForProject(kb, cfg);
+  const ut = String(userText || '');
+  const intentText = diagramGuess ? `${ut}\n${diagramGuess}` : ut;
+  const intent = classifyDiagramIntent(intentText, cfg.chinaUnivMode);
+  const kbPath = findKnowledgeBasePath();
+  const inj = buildKnowledgeInjection({
+    kbPath: kbPath || '',
+    intent,
+    userText: intentText,
+    maxChars: 40000,
+    jarLabel: resolvePlantumlJarLabelForPrompt(),
+  });
+  const kbPayload = {
+    l0: inj.l0,
+    kbExcerpt: inj.kbExcerpt,
+    selectedTitles: inj.selectedTitles,
+    intent,
+  };
+  const system = buildAgentSystemPromptForProject(kbPayload, cfg);
+  logs.push(
+    `[metrics] ${JSON.stringify({
+      mode: 'project_render',
+      intent,
+      kbChars: inj.kbExcerpt.length,
+      kbFallback: inj.fallback,
+      kbTruncated: inj.truncated,
+    })}`
+  );
   const maxExtra = cfg.maxRetries;
   const maxRounds = 1 + maxExtra;
 
@@ -713,7 +859,7 @@ async function runAgentPipelineWithProject(userText, projectRoot, ignoreGlobsTex
     const userContent =
       round === 0
         ? firstUserBlock
-        : `上一版源码经 PlantUML 校验未通过，请结合项目上下文修订后，再次输出完整源码（整段替换）。${PLANTUML_RETRY_HINT}${dupTail}\n\n--- 错误 ---\n${lastErr}\n\n--- 当前源码 ---\n${source}`;
+        : buildAgentRetryUserContent({ isProject: true, round, lastErr, source, dupTail });
 
     const raw = await deepseekChat(
       cfg,
@@ -721,7 +867,7 @@ async function runAgentPipelineWithProject(userText, projectRoot, ignoreGlobsTex
       { temperature: round > 0 ? 0.58 : 0.2 }
     );
     let extracted = extractPlantumlFromModelText(raw);
-    extracted = applyChinaUnivModeIfNeeded(extracted, cfg);
+    extracted = applyChinaUnivModeIfNeeded(extracted, cfg, { intent, userText: intentText });
     if (round > 0 && extracted === lastExtracted && lastExtracted.length > 20) {
       noRepeatHint = true;
       logs.push(`第 ${round + 1} 轮：提取结果与上一轮完全相同（${extracted.length} 字符），下一轮将加重「禁止重复」提示并提高采样温度。`);
@@ -738,9 +884,13 @@ async function runAgentPipelineWithProject(userText, projectRoot, ignoreGlobsTex
     }
 
     logs.push(`第 ${round + 1} 轮：已生成 ${source.length} 字符，正在本地 PlantUML 校验…`);
-    const { ok, errText } = await plantumlRenderCheck(source, ['-tpng']);
+    const { ok, errText, dualSvgOk, dualSvgWarning } = await plantumlRenderCheckWithOptionalSvg(source);
     if (ok) {
-      logs.push(`第 ${round + 1} 轮：校验通过`);
+      if (dualSvgWarning) logs.push(`第 ${round + 1} 轮：PNG 通过；可选 SVG 未通过（仅记录）：${dualSvgWarning}`);
+      logs.push(`第 ${round + 1} 轮：校验通过${dualSvgOk ? '（含可选 SVG）' : ''}`);
+      logs.push(
+        `[metrics] ${JSON.stringify({ mode: 'project_render', roundOk: round + 1, dualSvgOk: Boolean(dualSvgOk), dualSvgWarning: Boolean(dualSvgWarning) })}`
+      );
       return { ok: true, source, logs };
     }
     lastErr = errText || '未知渲染错误';

@@ -25,21 +25,25 @@ export function formatManifestJsonl(files, maxLines = 2200) {
   return { text: lines.join('\n'), lineCount: lines.length, truncated, totalFiles: files.length };
 }
 
-/** 从模型输出中解析 {"paths":[...], "rationale": "..."} */
+/** 从模型输出中解析 Planner JSON：paths、rationale、diagram_guess、risk_notes */
 export function parsePlannerPaths(raw) {
   const s = String(raw || '').trim();
   let rationale = '';
+  let diagramGuess = '';
+  let riskNotes = '';
   const tryParse = (jsonStr) => {
     const j = JSON.parse(jsonStr);
     const paths = Array.isArray(j.paths) ? j.paths.map((p) => String(p || '').trim()).filter(Boolean) : [];
     if (typeof j.rationale === 'string') rationale = j.rationale.slice(0, 2000);
+    if (typeof j.diagram_guess === 'string') diagramGuess = j.diagram_guess.trim().slice(0, 600);
+    if (typeof j.risk_notes === 'string') riskNotes = j.risk_notes.trim().slice(0, 1200);
     return paths;
   };
 
   const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fence) {
     try {
-      return { paths: tryParse(fence[1].trim()), rationale };
+      return { paths: tryParse(fence[1].trim()), rationale, diagramGuess, riskNotes };
     } catch {
       /* fallthrough */
     }
@@ -48,7 +52,7 @@ export function parsePlannerPaths(raw) {
   const last = s.lastIndexOf('}');
   if (brace >= 0 && last > brace) {
     try {
-      return { paths: tryParse(s.slice(brace, last + 1)), rationale };
+      return { paths: tryParse(s.slice(brace, last + 1)), rationale, diagramGuess, riskNotes };
     } catch {
       /* fallthrough */
     }
@@ -57,12 +61,12 @@ export function parsePlannerPaths(raw) {
   if (arr) {
     try {
       const a = JSON.parse(arr[0]);
-      if (Array.isArray(a)) return { paths: a.map(String).filter(Boolean), rationale: '' };
+      if (Array.isArray(a)) return { paths: a.map(String).filter(Boolean), rationale: '', diagramGuess: '', riskNotes: '' };
     } catch {
       /* ignore */
     }
   }
-  return { paths: [], rationale: '' };
+  return { paths: [], rationale: '', diagramGuess: '', riskNotes: '' };
 }
 
 function readFileSliceUtf8(fullPath, maxChars) {
@@ -134,6 +138,8 @@ export function buildProjectUserBlockParts({
   manifestTruncated,
   skippedSecrets,
   plannerRationale,
+  diagramGuess,
+  riskNotes,
   shortTree,
 }) {
   const tree = Array.isArray(shortTree) ? shortTree.join('\n') : String(shortTree || '');
@@ -144,6 +150,8 @@ export function buildProjectUserBlockParts({
     '【本地索引说明】',
     `清单条目约 ${manifestLineCount}；${manifestTruncated ? '已达上限已截断。' : ''}已排除疑似密钥/凭证路径 ${skippedSecrets} 处。`,
     plannerRationale ? `【规划说明】\n${plannerRationale}` : '',
+    diagramGuess ? `【规划器推断图种/意图（供制图对齐）】\n${diagramGuess}` : '',
+    riskNotes ? `【规划器风险备注】\n${riskNotes}` : '',
     '',
     '【目录树摘录（仅结构辅助，非完整仓库）】',
     tree || '(无)',

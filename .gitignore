@@ -20,6 +20,7 @@ release/
 release_new/
 release_build*/
 release_v2*/
+release_beta_stable/
 
 vendor/jre/
 vendor/_jre_extract/

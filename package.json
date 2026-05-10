@@ -1,7 +1,7 @@
 {
   "name": "plantuml-studio-local",
-  "version": "2.0.0-beta.10",
-  "description": "本地 PlantUML 编辑预览（PicoWeb + Electron，M3 Beta：国内高校模式提示词优化）",
+  "version": "2.0.0-pro.1",
+  "description": "本地 PlantUML 编辑预览（PicoWeb + Electron，v2.0.0 Pro：KB 分层注入、意图路由、规划器扩展与分级修正）",
   "main": "electron-main.mjs",
   "type": "module",
   "author": "",
@@ -30,6 +30,8 @@
       "scripts/license-common.mjs",
       "scripts/project-index.mjs",
       "scripts/project-context.mjs",
+      "scripts/agent-intent.mjs",
+      "scripts/kb-inject.mjs",
       "assets/app-logo-512.png"
     ],
     "extraResources": [
