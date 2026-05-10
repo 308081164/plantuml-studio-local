@@ -92,7 +92,7 @@ npm run prepare:jre
 npm start
 ```
 
-> **注意**：开发环境需要 `../plantuml-master/build/libs/plantuml-*.jar` 可用，或设置环境变量 `PLANTUML_JAR` 指向 PlantUML JAR 文件。
+> **注意**：开发环境请将 `plantuml-*.jar` 放入本目录下 `vendor/plantuml/`，或设置环境变量 `PLANTUML_JAR` 指向 PlantUML JAR 文件。
 
 ### 生产打包
 

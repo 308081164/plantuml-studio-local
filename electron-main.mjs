@@ -790,16 +790,6 @@ function findPlantumlJar() {
     }
   }
 
-  // 兼容旧路径：plantuml-master/build/libs/
-  const devLibs = join(__dirname, '..', 'plantuml-master', 'build', 'libs');
-  if (existsSync(devLibs)) {
-    const jars = readdirSync(devLibs).filter((f) => f.startsWith('plantuml-') && f.endsWith('.jar'));
-    if (jars.length) {
-      jars.sort((a, b) => statSync(join(devLibs, b)).mtimeMs - statSync(join(devLibs, a)).mtimeMs);
-      return join(devLibs, jars[0]);
-    }
-  }
-
   // 打包后的 resources/plantuml/
   const resLibs = join(process.resourcesPath || '', 'plantuml');
   if (existsSync(resLibs)) {
@@ -824,7 +814,7 @@ async function startPicoWeb() {
   if (!jar) {
     await dialog.showErrorBox(
       '未找到 PlantUML JAR',
-      '安装包中应包含 plantuml JAR。开发环境请将 plantuml-master 执行 Gradle 打出 JAR，\n或设置环境变量 PLANTUML_JAR。'
+      '安装包中应包含 plantuml JAR。开发环境请将 plantuml-*.jar 放入 vendor/plantuml/，\n或设置环境变量 PLANTUML_JAR 指向 JAR 文件。'
     );
     quitAppWithoutConfirm();
     return;

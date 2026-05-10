@@ -2,7 +2,7 @@
 
 > **用途**：供自动化智能体作为结构化专业知识库检索；人类读者亦可对照查阅。  
 > **权威来源**：语言关键字与预处理器集合与上游 `LanguageDescriptor` 对齐；各图类细节以 [plantuml.com](https://plantuml.com) 官方文档为准。  
-> **仓库锚点**（本机源码）：`plantuml-master/plantuml-master/src/main/java/net/sourceforge/plantuml/syntax/LanguageDescriptor.java`
+> **上游参考**（关键字集合）：[PlantUML 仓库 · LanguageDescriptor.java](https://github.com/plantuml/plantuml/blob/master/src/main/java/net/sourceforge/plantuml/syntax/LanguageDescriptor.java)
 
 ---
 
