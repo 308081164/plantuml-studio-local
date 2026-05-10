@@ -15,7 +15,8 @@ Desktop.ini
 .env.*
 !.env.example
 
-# Electron / electron-builder 输出（勿提交大二进制与解包目录）
+# Electron / electron-builder 输出（统一目录名 releases；下列含历史目录名以免误提交残留）
+releases/
 release/
 release_new/
 release_build*/

@@ -110,7 +110,7 @@ npm run dist:portable
 npm run dist:nsis
 ```
 
-打包产物位于 `release/` 目录，包含：
+打包产物位于 `releases/` 目录，包含：
 - NSIS 安装包（`.exe`）
 - 便携版（`.exe`，免安装）
 - `win-unpacked` 目录（解压即用）

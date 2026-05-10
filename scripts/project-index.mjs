@@ -17,6 +17,7 @@ const SKIP_DIR_NAMES = new Set([
   '.venv',
   'venv',
   'release',
+  'releases',
   'win-unpacked',
   'coverage',
   '.next',
