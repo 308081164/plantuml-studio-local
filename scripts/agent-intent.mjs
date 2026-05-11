@@ -28,6 +28,15 @@ export function classifyDiagramIntent(userText, chinaUnivMode = false) {
 }
 
 /**
+ * 用户描述是否明显指向「静态架构 / @studio-arch」草稿（供 UI 提示，可选）。
+ * @param {string} userText
+ */
+export function wantsArchitectureArchDraft(userText) {
+  const zh = String(userText || '');
+  return /@studio-arch|静态架构|依赖图|模块结构|包依赖|import\s*关系|代码结构图|仓库依赖/i.test(zh);
+}
+
+/**
  * 国内高校模式是否应对「当前意图」做 @startuml activity 等改写
  * @param {DiagramIntent} intent
  * @param {string} userText

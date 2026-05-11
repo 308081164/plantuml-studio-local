@@ -1,4 +1,5 @@
 import { isLockedPlaceholderText } from '../scripts/agent-session-lock.mjs';
+import { parseEditorDocument } from '../scripts/diagram-grammar.mjs';
 
 const DEFAULT_SOURCE = `@startuml
 title 示例
@@ -310,13 +311,60 @@ skinparam activity {
 
 async function render() {
   const bundle = await getEffectivePlantumlBundle();
-  let source = bundle.source;
+  const grammarText = document.body.classList.contains('studio-agent-source-locked')
+    ? bundle.source
+    : $('source').value;
+  const doc = parseEditorDocument(grammarText);
+
   const fmt = $('format').value;
   showErrors([]);
   setStatus('渲染中…', null);
-
-  source = applyChinaUnivModeIfNeeded(source);
   setPreviewLockOverlay(Boolean(bundle.locked));
+
+  if (doc.kind === 'studio-arch') {
+    if (!window.studio?.archRender) {
+      setStatus('当前版本不支持静态架构渲染', false);
+      return;
+    }
+    if (!selectedProjectRoot) {
+      showErrors(['请先选择「项目代码目录」，以便扫描仓库内静态 import 依赖。'], 'arch-no-root');
+      setStatus('未选择项目目录', false);
+      clearPreview();
+      return;
+    }
+    try {
+      const ar = await window.studio.archRender({
+        projectRoot: selectedProjectRoot,
+        ignoreGlobsText: projectIgnoreGlobsValue(),
+        archBlock: doc.archBlock,
+      });
+      if (!ar?.ok) {
+        showErrors([ar?.error || '架构图渲染失败'], 'arch-render');
+        setStatus('渲染失败', false);
+        clearPreview();
+        return;
+      }
+      $('preview-placeholder').classList.add('hidden');
+      $('preview-img').classList.add('hidden');
+      const wrap = $('preview-svg');
+      wrap.innerHTML = ar.svgText || '';
+      wrap.classList.remove('hidden');
+      showErrors([]);
+      const meta = ar.meta || {};
+      setStatus(
+        `已渲染静态架构 SVG（约 ${meta.nodes ?? '?'} 节点 / ${meta.edges ?? '?'} 条边 / 扫描 ${meta.files ?? '?'} 个源码文件）`,
+        true
+      );
+    } catch (e) {
+      const msg = String(e.message || e);
+      showErrors([msg], 'arch-exception');
+      setStatus('异常', false);
+    }
+    return;
+  }
+
+  let source = bundle.source;
+  source = applyChinaUnivModeIfNeeded(source);
 
   try {
     const base = await getBase();
@@ -326,13 +374,11 @@ async function render() {
       body: JSON.stringify({ source, options: [fmt] }),
     });
 
+    const diagErr = (res.headers.get('x-plantuml-diagram-error') || '').trim();
+    const diagLine = res.headers.get('x-plantuml-diagram-error-line');
     const errLines = [];
-    const eh = (name) => {
-      const v = res.headers.get(name);
-      if (v) errLines.push(`${name}: ${v}`);
-    };
-    eh('x-plantuml-diagram-error');
-    eh('x-plantuml-diagram-error-line');
+    if (diagErr) errLines.push(`x-plantuml-diagram-error: ${diagErr}`);
+    if (diagLine) errLines.push(`x-plantuml-diagram-error-line: ${diagLine}`);
 
     const ct = (res.headers.get('content-type') || '').toLowerCase();
 
@@ -341,6 +387,20 @@ async function render() {
       const errBlock = [`HTTP ${res.status}`, t.slice(0, 2000)];
       showErrors(errBlock, 'render-http');
       setStatus('请求失败', false);
+      return;
+    }
+
+    if (diagErr) {
+      if (fmt === '-tsvg' || ct.includes('svg')) await res.text();
+      else await res.arrayBuffer();
+      clearPreview();
+      showErrors(
+        errLines.length
+          ? errLines
+          : ['PlantUML 报告了语法或图形错误；已隐藏错误占位图（其中可能含有推广链接）。'],
+        'preview-plantuml'
+      );
+      setStatus('渲染失败：请根据上方文本信息修正源码', false);
       return;
     }
 
@@ -365,7 +425,7 @@ async function render() {
     }
 
     showErrors(errLines);
-    setStatus(errLines.length ? '已渲染（含 PlantUML 报错信息）' : '已渲染', !errLines.length);
+    setStatus(errLines.length ? '已渲染（含响应头提示）' : '已渲染', !errLines.length);
   } catch (e) {
     const msg = String(e.message || e);
     showErrors([msg], 'render-exception');
@@ -379,12 +439,50 @@ async function exportFile() {
     return;
   }
   const bundle = await getEffectivePlantumlBundle();
+  const grammarText = document.body.classList.contains('studio-agent-source-locked')
+    ? bundle.source
+    : $('source').value;
+  const doc = parseEditorDocument(grammarText);
+
+  if (doc.kind === 'studio-arch') {
+    if (!selectedProjectRoot) {
+      setStatus('请先选择项目目录', false);
+      return;
+    }
+    if (!window.studio?.archRender) {
+      setStatus('架构导出不可用', false);
+      return;
+    }
+    setStatus('导出静态架构 SVG…', null);
+    try {
+      const ar = await window.studio.archRender({
+        projectRoot: selectedProjectRoot,
+        ignoreGlobsText: projectIgnoreGlobsValue(),
+        archBlock: doc.archBlock,
+      });
+      if (!ar?.ok) {
+        setStatus(ar?.error || '导出失败', false);
+        return;
+      }
+      const blob = new Blob([ar.svgText || ''], { type: 'image/svg+xml' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'studio-arch.svg';
+      a.click();
+      URL.revokeObjectURL(a.href);
+      setStatus('已下载 studio-arch.svg', true);
+    } catch (e) {
+      setStatus(String(e.message || e), false);
+    }
+    return;
+  }
+
   let source = bundle.source;
   const fmt = $('format').value;
   setStatus('导出中…', null);
 
   source = applyChinaUnivModeIfNeeded(source);
-  
+
   try {
     const base = await getBase();
     const res = await fetch(`${base}/render`, {
@@ -394,6 +492,16 @@ async function exportFile() {
     });
     if (!res.ok) {
       setStatus(`导出失败 HTTP ${res.status}`, false);
+      return;
+    }
+    const diagErr = (res.headers.get('x-plantuml-diagram-error') || '').trim();
+    if (diagErr) {
+      if (fmt === '-tsvg' || (res.headers.get('content-type') || '').toLowerCase().includes('svg')) {
+        await res.text();
+      } else {
+        await res.arrayBuffer();
+      }
+      setStatus('PlantUML 报错，已取消导出（避免下载含推广信息的错误图）', false);
       return;
     }
     const ext = fmt === '-tsvg' ? 'svg' : 'png';
@@ -451,6 +559,11 @@ async function copyPreviewPngToClipboard() {
     }
 
     if (!svgWrap.classList.contains('hidden')) {
+      const doc = parseEditorDocument($('source').value);
+      if (doc.kind === 'studio-arch') {
+        setStatus('静态架构图为 SVG：请使用「导出」下载，或从预览区复制 SVG 源码（暂不支持转 PNG 剪贴板）', false);
+        return;
+      }
       const bundle = await getEffectivePlantumlBundle();
       const source = bundle.source;
       const png = await window.studio.renderPngToBuffer(source);
@@ -1122,6 +1235,7 @@ async function applyAgentRunResult(r) {
   recordSessionExecutionLog([logText, r.error && !r.ok ? `错误: ${r.error}` : ''].filter(Boolean).join('\n'));
   const display = r.displaySource != null ? r.displaySource : r.source;
   if (display) $('source').value = display;
+  const isArchDraft = Boolean(display && /^@studio-arch\b/i.test(String(display).trim()));
   if (r.locked) {
     document.body.classList.add('studio-agent-source-locked');
     $('source').readOnly = true;
@@ -1134,7 +1248,7 @@ async function applyAgentRunResult(r) {
     updatePayUnlockButtonsVisible(false);
   }
   if (r.ok) {
-    setStatus('智能生成成功，正在刷新预览…', true);
+    setStatus(isArchDraft ? '静态架构草稿已填入，正在渲染预览…' : '智能生成成功，正在刷新预览…', true);
     await render();
   } else {
     setStatus(r.error || '智能生成未通过校验', false);
@@ -1257,6 +1371,32 @@ async function runAgentProjectOneClick() {
     const msg = String(e.message || e);
     setStatus(msg, false);
     reportErrorArchive('agent-project-exception', msg);
+  }
+}
+
+async function runAgentArchDraft() {
+  if (!window.studio?.runAgentArchDraft) return;
+  const goal = $('agent-request').value.trim();
+  if (!goal) {
+    setStatus('请填写自然语言需求（例如：标出 renderer 与 electron-main 的依赖关系）', false);
+    return;
+  }
+  if (!selectedProjectRoot) {
+    setStatus('请先选择项目目录', false);
+    return;
+  }
+  setStatus('DeepSeek 正在生成 @studio-arch 草稿（独立知识库）…', null);
+  try {
+    const r = await window.studio.runAgentArchDraft({
+      userText: goal,
+      projectRoot: selectedProjectRoot,
+      ignoreGlobsText: projectIgnoreGlobsValue(),
+    });
+    await applyAgentRunResult(r);
+  } catch (e) {
+    const msg = String(e.message || e);
+    setStatus(msg, false);
+    reportErrorArchive('agent-arch-draft-exception', msg);
   }
 }
 
@@ -1403,6 +1543,8 @@ function init() {
 
   $('btn-save-agent-cfg').addEventListener('click', () => saveAgentForm());
   $('btn-agent-run').addEventListener('click', () => runAgent());
+  $('btn-agent-project')?.addEventListener('click', () => runAgentProjectOneClick());
+  $('btn-agent-arch-draft')?.addEventListener('click', () => runAgentArchDraft());
 
   $('btn-project-pick')?.addEventListener('click', () => pickProjectDirectory());
 
