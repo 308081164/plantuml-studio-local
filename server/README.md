@@ -24,7 +24,7 @@
 该文件已被根目录 `.gitignore` 忽略，**不会进入 git**。  
 `index.mjs` 启动时会通过 `dotenv` **自动加载** `server/.env`。
 
-使用 **Docker Compose** 时：在 **`server/` 目录下**（与 `docker-compose.yml` 同级）同样放置 **`server/.env`**，Compose 的 `env_file: .env` 会从宿主机读取该文件并注入容器。
+使用 **Docker Compose** 时：在 **`server/` 目录下**（与 `docker-compose.yml` 同级）放置 **`server/.env`**，Compose 的 `env_file: .env` 会从宿主机读取该文件并注入容器。**首次 CI 部署**若目录里没有 `.env`，流水线会从 `.env.example` 自动复制一份占位文件（你仍需 SSH 上机填写真实密钥）。
 
 ---
 

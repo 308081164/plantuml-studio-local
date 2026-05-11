@@ -163,4 +163,10 @@ jobs:
             --exclude='.env' \
             -C ./server . \
             | ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "${REMOTE}" "mkdir -p ~/plantuml-pay-server && tar xzf - -C ~/plantuml-pay-server"
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "${REMOTE}" "set -e; cd ~/plantuml-pay-server && docker compose up -d --build"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "${REMOTE}" "set -e; cd ~/plantuml-pay-server; \
+            if [ ! -f .env ]; then \
+              if [ -f .env.example ]; then cp .env.example .env; else touch .env; fi; \
+              chmod 600 .env; \
+              echo '提示：已生成占位 .env（CI 从不上传密钥）。生产环境请 SSH 编辑 ~/plantuml-pay-server/.env 填写支付宝等变量。'; \
+            fi; \
+            docker compose up -d --build"

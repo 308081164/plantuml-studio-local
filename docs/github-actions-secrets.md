@@ -95,7 +95,7 @@
 - 从 Windows 记事本复制进 GitHub Secret 时容易带入 **`\\r\\n`**，会导致 OpenSSL 解析失败；请在 Linux/macOS 终端用 `cat id_ed25519` 复制，或在 Secret 中确保为 **Unix 换行（LF）**。
 - 确认粘贴的是 **私钥** 全文，且首尾无多余 `%`、空格或说明文字。
 
-**服务器需预先**：安装 Docker 与 Docker Compose 插件；在 `~/plantuml-pay-server/` 首次可手动放一份 **`server/.env`**（含支付宝密钥，勿经 CI 上传）。同步方式为 **tar 覆盖解压**：仓库里已删除的文件**不会**从服务器目录自动删除（与旧版 `rsync --delete` 不同）；若需完全一致可偶尔手动清理目标目录。CI 打包时已排除 `.env`，**不会**覆盖线上 `.env`。
+**服务器需预先**：安装 Docker 与 Docker Compose 插件；在 `~/plantuml-pay-server/` 首次部署时 **GitHub Actions 会从 `.env.example` 自动生成 `.env` 占位**（因 CI 从不同步真实 `.env`），你仍需 **SSH 登录编辑** `~/plantuml-pay-server/.env` 填入支付宝等密钥后再按需重启容器。同步方式为 **tar 覆盖解压**：仓库里已删除的文件**不会**从服务器目录自动删除（与旧版 `rsync --delete` 不同）；若需完全一致可偶尔手动清理目标目录。CI 打包时已排除 `.env`，**不会**覆盖你已在服务器上配置好的 `.env`。
 
 ---
 
