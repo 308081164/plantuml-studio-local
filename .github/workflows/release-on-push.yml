@@ -1,4 +1,4 @@
-# 推送至 main/master 时：补丁版本 +1 → 提交 [skip ci] → 打 tag → 构建 Windows 安装包 → 发布到 GitHub Releases
+# 推送至 main 时：补丁版本 +1 → 提交 [skip ci] → 打 tag → 构建 Windows 安装包 → 发布到 GitHub Releases
 # 构建产物目录与本地一致：releases/（安装包与便携版 .exe 一并上传）
 
 name: Release on push
@@ -7,7 +7,6 @@ on:
   push:
     branches:
       - main
-      - master
   workflow_dispatch:
 
 concurrency:
