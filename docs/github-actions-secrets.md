@@ -65,6 +65,28 @@
 | `SSH_SECRET` | 与 `SSH_HOST` 同时配置时必填 | **OpenSSH 私钥全文**（`-----BEGIN ... PRIVATE KEY-----` …）；**不是** root 登录密码，也不是 `.pub` 公钥 |
 | `SSH_USER` | 可选 | 登录用户名，未配置时默认为 **`root`** |
 
+**重要：`SSH_SECRET` 绝对不能填服务器登录密码。** 本工作流使用 `ssh` / `rsync` 的 **公钥认证**（`BatchMode=yes`），不会、也无法用密码登录。密码既不是合法私钥，也不应出现在 GitHub（有泄露风险）。若曾把真实密码粘贴进 Secret，请 **立即修改服务器登录密码**，并把 GitHub 里的 `SSH_SECRET` 改成下面生成的 **私钥**。
+
+**正确配置步骤（在本机或任意电脑执行一次即可）**
+
+1. 生成 **无口令** 的部署专用密钥（不要对 CI 用的 key 设 passphrase）：
+
+   ```bash
+   ssh-keygen -t ed25519 -f ./gha-deploy-key -N ""
+   ```
+
+2. 把 **公钥** 追加到服务器的 `authorized_keys`（把 `USER`、`HOST` 换成你的 `SSH_USER` / `SSH_HOST`）：
+
+   ```bash
+   ssh-copy-id -i ./gha-deploy-key.pub USER@HOST
+   ```
+
+   若不能用 `ssh-copy-id`，可手动把 `gha-deploy-key.pub` 的一行内容追加到服务器上 `~/.ssh/authorized_keys`，并保证 `~/.ssh` 权限为 `700`、`authorized_keys` 为 `600`。
+
+3. 在 GitHub → 仓库 → **Settings → Secrets and variables → Actions** 中，编辑 **`SSH_SECRET`**：打开文件 **`gha-deploy-key`（无 .pub 后缀的那份）**，**全文复制**（含 `BEGIN` / `END` 行），粘贴保存。**不要**粘贴 `.pub` 文件，也不要粘贴密码。
+
+4. 删除本机临时文件 `gha-deploy-key` 与 `gha-deploy-key.pub`（私钥已进 GitHub Secret 后，本机副本按需保留备份或删除）。
+
 若未配置 `SSH_HOST`，该 Job 会跳过部署且不报错（也不会加载 `SSH_SECRET`）。
 
 **SSH Secret 常见问题（`ssh-add` / `error in libcrypto`）**
