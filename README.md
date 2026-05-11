@@ -88,16 +88,19 @@ npm install
 # 3. 下载 JRE（首次或缺少 JRE 时）
 npm run prepare:jre
 
-# 4. 启动开发模式
+# 4. 下载 PlantUML JAR（首次或 vendor/plantuml 为空时）
+npm run prepare:plantuml
+
+# 5. 启动开发模式
 npm start
 ```
 
-> **注意**：开发环境请将 `plantuml-*.jar` 放入本目录下 `vendor/plantuml/`，或设置环境变量 `PLANTUML_JAR` 指向 PlantUML JAR 文件。
+> **注意**：`plantuml-*.jar` 默认不在 git 中。开发可执行 `npm run prepare:plantuml` 自动下载到 `vendor/plantuml/`，或手动放入 JAR / 设置环境变量 `PLANTUML_JAR`。
 
 ### 生产打包
 
 ```bash
-# 构建安装包（自动下载 JRE 并打包）
+# 构建安装包（自动下载 Windows JRE + 官方 PlantUML JAR 并打包）
 npm run dist
 
 # 或构建 Beta 版

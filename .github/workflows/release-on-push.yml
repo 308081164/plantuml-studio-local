@@ -68,6 +68,11 @@ jobs:
       - name: Prepare JRE
         run: npm run prepare:jre
 
+      - name: Prepare PlantUML JAR
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: npm run prepare:plantuml
+
       - name: Build Windows installers
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

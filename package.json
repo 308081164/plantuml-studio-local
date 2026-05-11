@@ -9,11 +9,12 @@
   "scripts": {
     "start": "electron .",
     "prepare:jre": "node scripts/download-jre.mjs",
+    "prepare:plantuml": "node scripts/download-plantuml-jar.mjs",
     "pack": "electron-builder --dir",
-    "dist": "npm run prepare:jre && electron-builder --win --x64",
-    "dist:beta": "npm run prepare:jre && electron-builder --win --x64",
-    "dist:portable": "npm run prepare:jre && electron-builder --win --x64 portable",
-    "dist:nsis": "npm run prepare:jre && electron-builder --win --x64 nsis"
+    "dist": "npm run prepare:jre && npm run prepare:plantuml && electron-builder --win --x64",
+    "dist:beta": "npm run prepare:jre && npm run prepare:plantuml && electron-builder --win --x64",
+    "dist:portable": "npm run prepare:jre && npm run prepare:plantuml && electron-builder --win --x64 portable",
+    "dist:nsis": "npm run prepare:jre && npm run prepare:plantuml && electron-builder --win --x64 nsis"
   },
   "build": {
     "appId": "com.uml_master.plantuml-studio",
@@ -37,6 +38,7 @@
       "scripts/diagram-grammar.mjs",
       "scripts/studio-arch-graph.mjs",
       "scripts/arch-agent-prompt.mjs",
+      "scripts/download-plantuml-jar.mjs",
       "assets/app-logo-512.png"
     ],
     "extraResources": [

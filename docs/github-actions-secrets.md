@@ -4,6 +4,8 @@
 
 **请勿**将云服务器 SSH 密码、支付宝私钥等敏感信息写入仓库或提交到 git。
 
+**Windows 安装包与 PlantUML JAR**：`plantuml-*.jar` 在 `.gitignore` 中，仓库不含该二进制。工作流在 `electron-builder` 前会执行 **`npm run prepare:plantuml`**（从 PlantUML 官方 GitHub latest 下载 `plantuml-{version}.jar` 至 `vendor/plantuml/`），否则安装包内无 JAR，启动会提示「未找到 PlantUML JAR」。`GITHUB_TOKEN` 由工作流注入，用于提高 `api.github.com` 请求额度。
+
 ---
 
 ## 1. 发布元数据注入（工作流 `update-infra-release-meta` 任务）
