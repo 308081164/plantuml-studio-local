@@ -62,10 +62,16 @@
 | Secret / Variable | 必填 | 说明 |
 |-------------------|------|------|
 | `SSH_HOST` | 部署时必填 | 服务器 IP 或域名（**不要**带 `http://`） |
-| `SSH_SECRET` | 部署时必填 | **OpenSSH 私钥全文**（`-----BEGIN ... PRIVATE KEY-----` …），用于 `webfactory/ssh-agent`；**不是** root 登录密码 |
+| `SSH_SECRET` | 与 `SSH_HOST` 同时配置时必填 | **OpenSSH 私钥全文**（`-----BEGIN ... PRIVATE KEY-----` …）；**不是** root 登录密码，也不是 `.pub` 公钥 |
 | `SSH_USER` | 可选 | 登录用户名，未配置时默认为 **`root`** |
 
-若未配置 `SSH_HOST`，该 Job 会跳过部署且不报错。
+若未配置 `SSH_HOST`，该 Job 会跳过部署且不报错（也不会加载 `SSH_SECRET`）。
+
+**SSH Secret 常见问题（`ssh-add` / `error in libcrypto`）**
+
+- 私钥须为 **未设置口令**（无 passphrase）的部署专用密钥；有口令时 CI 无法交互输入会失败。
+- 从 Windows 记事本复制进 GitHub Secret 时容易带入 **`\\r\\n`**，会导致 OpenSSL 解析失败；请在 Linux/macOS 终端用 `cat id_ed25519` 复制，或在 Secret 中确保为 **Unix 换行（LF）**。
+- 确认粘贴的是 **私钥** 全文，且首尾无多余 `%`、空格或说明文字。
 
 **服务器需预先**：安装 Docker 与 Docker Compose 插件；在 `~/plantuml-pay-server/` 首次可手动放一份 **`server/.env`**（含支付宝密钥，勿经 CI 上传）。CI 的 rsync 已 **`--exclude .env`**，避免覆盖线上密钥。
 

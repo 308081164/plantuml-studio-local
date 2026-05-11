@@ -130,24 +130,30 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup SSH agent
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.SSH_SECRET }}
-
       - name: Deploy server directory and restart Docker
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_SECRET: ${{ secrets.SSH_SECRET }}
         run: |
           set -e
           if [ -z "${SSH_HOST}" ]; then
             echo "未配置 SSH_HOST，跳过服务端部署。"
             exit 0
           fi
+          if [ -z "${SSH_SECRET}" ]; then
+            echo "已配置 SSH_HOST 但未配置 SSH_SECRET，无法部署。"
+            exit 1
+          fi
           USER="${SSH_USER:-root}"
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
+          # 规范化私钥：去掉 Windows CRLF，避免 ssh-add 报 error in libcrypto
+          tr -d '\r' <<< "${SSH_SECRET}" > ~/.ssh/id_ci_deploy
+          chmod 600 ~/.ssh/id_ci_deploy
+          eval "$(ssh-agent -s)"
+          ssh-add ~/.ssh/id_ci_deploy
+          rm -f ~/.ssh/id_ci_deploy
           ssh-keyscan -H "${SSH_HOST}" >> ~/.ssh/known_hosts
           DEST="${USER}@${SSH_HOST}:~/plantuml-pay-server/"
           rsync -avz -e ssh --delete \
