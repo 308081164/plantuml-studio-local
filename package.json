@@ -18,6 +18,7 @@
   "build": {
     "appId": "com.uml_master.plantuml-studio",
     "productName": "PlantUML本地工作室",
+    "publish": null,
     "directories": {
       "output": "releases"
     },
