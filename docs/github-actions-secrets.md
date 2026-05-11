@@ -95,7 +95,7 @@
 - 从 Windows 记事本复制进 GitHub Secret 时容易带入 **`\\r\\n`**，会导致 OpenSSL 解析失败；请在 Linux/macOS 终端用 `cat id_ed25519` 复制，或在 Secret 中确保为 **Unix 换行（LF）**。
 - 确认粘贴的是 **私钥** 全文，且首尾无多余 `%`、空格或说明文字。
 
-**服务器需预先**：安装 Docker 与 Docker Compose 插件；在 `~/plantuml-pay-server/` 首次可手动放一份 **`server/.env`**（含支付宝密钥，勿经 CI 上传）。CI 的 rsync 已 **`--exclude .env`**，避免覆盖线上密钥。
+**服务器需预先**：安装 Docker 与 Docker Compose 插件；**安装 `rsync`**（接收端需有 `rsync`，例如 `sudo apt-get install -y rsync`）；在 `~/plantuml-pay-server/` 首次可手动放一份 **`server/.env`**（含支付宝密钥，勿经 CI 上传）。CI 的 rsync 已 **`--exclude .env`**，避免覆盖线上密钥。
 
 ---
 

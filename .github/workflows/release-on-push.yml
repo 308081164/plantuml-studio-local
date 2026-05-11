@@ -130,6 +130,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ubuntu-latest 部分镜像/更新周期下可能未预装 rsync，显式安装避免「command not found」
+      - name: Install rsync
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y rsync
+
       - name: Deploy server directory and restart Docker
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
