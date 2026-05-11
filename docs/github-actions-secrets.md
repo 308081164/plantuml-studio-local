@@ -57,7 +57,7 @@
 
 ## 3. SSH 自动部署支付服务（工作流 `deploy-pay-server`）
 
-在 Release 构建及可选的「发布元数据」步骤完成后，Runner 会通过 **SSH + rsync** 将仓库内 **`server/`** 目录同步到服务器 `~/plantuml-pay-server/`，并执行 **`docker compose up -d --build`**。
+在 Release 构建及可选的「发布元数据」步骤完成后，Runner 会通过 **SSH** 将仓库内 **`server/`** 目录以 **tar 流** 同步到服务器 `~/plantuml-pay-server/`，并执行 **`docker compose up -d --build`**（**不依赖**本机或服务器安装 `rsync`）。
 
 | Secret / Variable | 必填 | 说明 |
 |-------------------|------|------|
@@ -65,7 +65,7 @@
 | `SSH_SECRET` | 与 `SSH_HOST` 同时配置时必填 | **OpenSSH 私钥全文**（`-----BEGIN ... PRIVATE KEY-----` …）；**不是** root 登录密码，也不是 `.pub` 公钥 |
 | `SSH_USER` | 可选 | 登录用户名，未配置时默认为 **`root`** |
 
-**重要：`SSH_SECRET` 绝对不能填服务器登录密码。** 本工作流使用 `ssh` / `rsync` 的 **公钥认证**（`BatchMode=yes`），不会、也无法用密码登录。密码既不是合法私钥，也不应出现在 GitHub（有泄露风险）。若曾把真实密码粘贴进 Secret，请 **立即修改服务器登录密码**，并把 GitHub 里的 `SSH_SECRET` 改成下面生成的 **私钥**。
+**重要：`SSH_SECRET` 绝对不能填服务器登录密码。** 本工作流使用 `ssh` 的 **公钥认证**（`BatchMode=yes`），不会、也无法用密码登录。密码既不是合法私钥，也不应出现在 GitHub（有泄露风险）。若曾把真实密码粘贴进 Secret，请 **立即修改服务器登录密码**，并把 GitHub 里的 `SSH_SECRET` 改成下面生成的 **私钥**。
 
 **正确配置步骤（在本机或任意电脑执行一次即可）**
 
@@ -95,7 +95,7 @@
 - 从 Windows 记事本复制进 GitHub Secret 时容易带入 **`\\r\\n`**，会导致 OpenSSL 解析失败；请在 Linux/macOS 终端用 `cat id_ed25519` 复制，或在 Secret 中确保为 **Unix 换行（LF）**。
 - 确认粘贴的是 **私钥** 全文，且首尾无多余 `%`、空格或说明文字。
 
-**服务器需预先**：安装 Docker 与 Docker Compose 插件；**安装 `rsync`**（接收端需有 `rsync`，例如 `sudo apt-get install -y rsync`）；在 `~/plantuml-pay-server/` 首次可手动放一份 **`server/.env`**（含支付宝密钥，勿经 CI 上传）。CI 的 rsync 已 **`--exclude .env`**，避免覆盖线上密钥。
+**服务器需预先**：安装 Docker 与 Docker Compose 插件；在 `~/plantuml-pay-server/` 首次可手动放一份 **`server/.env`**（含支付宝密钥，勿经 CI 上传）。同步方式为 **tar 覆盖解压**：仓库里已删除的文件**不会**从服务器目录自动删除（与旧版 `rsync --delete` 不同）；若需完全一致可偶尔手动清理目标目录。CI 打包时已排除 `.env`，**不会**覆盖线上 `.env`。
 
 ---
 

@@ -130,12 +130,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ubuntu-latest 部分镜像/更新周期下可能未预装 rsync，显式安装避免「command not found」
-      - name: Install rsync
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y rsync
-
       - name: Deploy server directory and restart Docker
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
@@ -161,11 +155,12 @@ jobs:
           ssh-add ~/.ssh/id_ci_deploy
           rm -f ~/.ssh/id_ci_deploy
           ssh-keyscan -H "${SSH_HOST}" >> ~/.ssh/known_hosts
-          DEST="${USER}@${SSH_HOST}:~/plantuml-pay-server/"
-          rsync -avz -e ssh --delete \
-            --exclude node_modules \
-            --exclude data \
-            --exclude .env \
-            ./server/ "${DEST}"
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "${USER}@${SSH_HOST}" \
-            "set -e; cd ~/plantuml-pay-server && docker compose up -d --build"
+          SSH=(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "${USER}@${SSH_HOST}")
+          # tar|ssh 同步：不要求本机或服务器安装 rsync（rsync 会在远端执行 rsync，精简镜像常缺该命令）
+          tar czf - \
+            --exclude='node_modules' \
+            --exclude='data' \
+            --exclude='.env' \
+            -C ./server .
+          | "${SSH[@]}" "mkdir -p ~/plantuml-pay-server && tar xzf - -C ~/plantuml-pay-server"
+          "${SSH[@]}" "set -e; cd ~/plantuml-pay-server && docker compose up -d --build"

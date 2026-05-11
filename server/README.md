@@ -5,7 +5,7 @@
 ## CI/CD 当前会部署后端吗？
 
 **会（在推送 `main` 且 Release 流水线成功时）。**  
-工作流 `deploy-pay-server` 在构建与可选的「发布元数据」步骤之后执行：通过 **SSH + rsync** 将仓库内 **`server/`** 同步到服务器 **`~/plantuml-pay-server/`**，并执行 **`docker compose up -d --build`**。  
+工作流 `deploy-pay-server` 在构建与可选的「发布元数据」步骤之后执行：通过 **SSH + tar 流** 将仓库内 **`server/`** 同步到服务器 **`~/plantuml-pay-server/`**，并执行 **`docker compose up -d --build`**（不要求服务器安装 `rsync`）。  
 需在 GitHub Actions Secrets 中配置 **`SSH_HOST`**、**`SSH_SECRET`**（OpenSSH 私钥全文），可选 **`SSH_USER`**（默认 `root`）。未配置 `SSH_HOST` 时该步骤会跳过。
 
 详见仓库根目录 **`docs/github-actions-secrets.md`**。
