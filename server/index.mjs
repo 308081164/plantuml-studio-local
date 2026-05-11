@@ -7,6 +7,7 @@
 
 import dotenv from 'dotenv';
 import express from 'express';
+import { AlipaySdk } from 'alipay-sdk';
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -27,8 +28,49 @@ const ALIPAY_APP_PRIVATE_KEY = process.env.ALIPAY_APP_PRIVATE_KEY || '';
 /** 支付宝「支付宝公钥」（验签异步通知，非应用公钥） */
 const ALIPAY_PUBLIC_KEY = process.env.ALIPAY_PUBLIC_KEY || '';
 const ALIPAY_APP_ID = process.env.ALIPAY_APP_ID || '';
+/** 外网根地址（用于 notify_url / return_url），生产须 HTTPS，如 https://pay.example.com */
+const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').trim().replace(/\/$/, '');
+const ALIPAY_KEY_TYPE = process.env.ALIPAY_KEY_TYPE === 'PKCS1' ? 'PKCS1' : 'PKCS8';
 
 const orders = new Map();
+
+function getPublicBaseUrl(req) {
+  if (PUBLIC_BASE_URL) return PUBLIC_BASE_URL;
+  const host = req.get('host') || '';
+  const proto = req.protocol || 'http';
+  return host ? `${proto}://${host}` : `http://127.0.0.1:${PORT}`;
+}
+
+function createAlipaySdk() {
+  if (!ALIPAY_APP_ID || !ALIPAY_APP_PRIVATE_KEY || !ALIPAY_PUBLIC_KEY) return null;
+  return new AlipaySdk({
+    appId: ALIPAY_APP_ID,
+    privateKey: ALIPAY_APP_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    alipayPublicKey: ALIPAY_PUBLIC_KEY.replace(/\\n/g, '\n'),
+    signType: 'RSA2',
+    gateway: process.env.ALIPAY_GATEWAY || 'https://openapi.alipay.com/gateway.do',
+    timeout: 15000,
+    keyType: ALIPAY_KEY_TYPE,
+  });
+}
+
+function tryVerifyAlipayNotify(postData) {
+  const sdk = createAlipaySdk();
+  if (!sdk) {
+    return { ok: false, error: '未配置支付宝密钥，跳过验签（请配置 ALIPAY_APP_ID / 私钥 / 支付宝公钥）' };
+  }
+  try {
+    let ok = false;
+    if (typeof sdk.checkNotifySignV2 === 'function') {
+      ok = sdk.checkNotifySignV2(postData);
+    } else {
+      ok = sdk.checkNotifySign(postData);
+    }
+    return { ok: Boolean(ok), error: ok ? undefined : '通知验签未通过' };
+  } catch (e) {
+    return { ok: false, error: String(e.message || e) };
+  }
+}
 
 function ensureDataDir() {
   mkdirSync(DATA_DIR, { recursive: true });
@@ -58,29 +100,10 @@ function buildUnlockToken(order) {
   return createHash('sha256').update(payload + '|' + (process.env.UNLOCK_PEPPER || 'studio-unlock-v1')).digest('hex');
 }
 
-async function tryVerifyAlipayNotify(postData) {
-  if (!ALIPAY_APP_ID || !ALIPAY_APP_PRIVATE_KEY || !ALIPAY_PUBLIC_KEY) {
-    return { ok: false, error: '未配置支付宝密钥，跳过验签（请配置 ALIPAY_APP_ID / 私钥 / 支付宝公钥）' };
-  }
-  try {
-    const mod = await import('alipay-sdk');
-    const AlipaySdk = mod.default || mod;
-    const alipaySdk = new AlipaySdk({
-      appId: ALIPAY_APP_ID,
-      privateKey: ALIPAY_APP_PRIVATE_KEY.replace(/\\n/g, '\n'),
-      alipayPublicKey: ALIPAY_PUBLIC_KEY.replace(/\\n/g, '\n'),
-      signType: 'RSA2',
-      gateway: process.env.ALIPAY_GATEWAY || 'https://openapi.alipay.com/gateway.do',
-      timeout: 15000,
-    });
-    const ok = typeof alipaySdk.checkNotifySign === 'function' && alipaySdk.checkNotifySign(postData);
-    return { ok: Boolean(ok), error: ok ? undefined : 'checkNotifySign 未通过' };
-  } catch (e) {
-    return { ok: false, error: String(e.message || e) };
-  }
-}
-
 const app = express();
+if (String(process.env.TRUST_PROXY || '') === '1') {
+  app.set('trust proxy', 1);
+}
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
@@ -89,39 +112,59 @@ app.get('/api/health', (_req, res) => {
 });
 
 /** 创建解锁订单（客户端轮询 /api/orders/:id/status） */
-app.post('/api/orders', (req, res) => {
-  const hwId = String(req.body?.hwId || '').trim();
-  const contentDigest = String(req.body?.contentDigest || '').trim();
-  const sku = String(req.body?.sku || 'agent_output_unlock');
-  const amount = Number(req.body?.amount) || 0.8;
-  if (!hwId || !contentDigest) {
-    return res.status(400).json({ ok: false, error: '缺少 hwId 或 contentDigest' });
-  }
-  const id = randomUUID();
-  const order = {
-    id,
-    hwId,
-    contentDigest,
-    sku,
-    amount,
-    status: 'pending',
-    createdAt: Date.now(),
-    unlockToken: null,
-  };
-  orders.set(id, order);
-  persistOrders();
+app.post('/api/orders', async (req, res) => {
+  try {
+    const hwId = String(req.body?.hwId || '').trim();
+    const contentDigest = String(req.body?.contentDigest || '').trim();
+    const sku = String(req.body?.sku || 'agent_output_unlock');
+    const amount = Number(req.body?.amount) || 0.8;
+    if (!hwId || !contentDigest) {
+      return res.status(400).json({ ok: false, error: '缺少 hwId 或 contentDigest' });
+    }
+    const id = randomUUID();
+    const order = {
+      id,
+      hwId,
+      contentDigest,
+      sku,
+      amount,
+      status: 'pending',
+      createdAt: Date.now(),
+      unlockToken: null,
+    };
+    orders.set(id, order);
+    persistOrders();
 
-  let payUrl = '';
-  if (MOCK_PAY) {
-    payUrl = `${req.protocol}://${req.get('host')}/mock-pay/checkout?orderId=${encodeURIComponent(id)}`;
-  } else if (ALIPAY_APP_ID) {
-    // 真实场景需按产品调用「手机网站支付」或「当面付」等接口生成表单/链接；此处返回占位，由商户自行补全 SDK 调用
-    payUrl = `${req.protocol}://${req.get('host')}/pay/alipay-placeholder?orderId=${encodeURIComponent(id)}`;
-  } else {
-    payUrl = '';
-  }
+    let payUrl = '';
+    if (MOCK_PAY) {
+      payUrl = `${req.protocol}://${req.get('host')}/mock-pay/checkout?orderId=${encodeURIComponent(id)}`;
+    } else {
+      const sdk = createAlipaySdk();
+      if (!sdk) {
+        return res.status(503).json({
+          ok: false,
+          error: '未配置完整支付宝参数（ALIPAY_APP_ID / ALIPAY_APP_PRIVATE_KEY / ALIPAY_PUBLIC_KEY），无法下单',
+        });
+      }
+      const publicBase = getPublicBaseUrl(req);
+      payUrl = sdk.pageExecute('alipay.trade.page.pay', 'GET', {
+        bizContent: {
+          out_trade_no: id,
+          product_code: 'FAST_INSTANT_TRADE_PAY',
+          subject: 'PlantUML 智能生成解锁',
+          body: `sku:${String(sku).slice(0, 100)}`,
+          total_amount: Math.max(0.01, amount).toFixed(2),
+        },
+        notifyUrl: `${publicBase}/api/alipay/notify`,
+        returnUrl: `${publicBase}/pay/return?orderId=${encodeURIComponent(id)}`,
+      });
+    }
 
-  res.json({ ok: true, orderId: id, payUrl, mock: MOCK_PAY });
+    res.json({ ok: true, orderId: id, payUrl, mock: MOCK_PAY });
+  } catch (e) {
+    console.error('[api/orders]', e);
+    res.status(500).json({ ok: false, error: String(e.message || e) });
+  }
 });
 
 app.get('/api/orders/:id/status', (req, res) => {
@@ -136,7 +179,7 @@ app.get('/api/orders/:id/status', (req, res) => {
 });
 
 /** 支付宝异步通知（application/x-www-form-urlencoded） */
-app.post('/api/alipay/notify', async (req, res) => {
+app.post('/api/alipay/notify', (req, res) => {
   const postData = req.body || {};
   const tradeStatus = postData.trade_status;
   const outTradeNo = postData.out_trade_no;
@@ -145,7 +188,7 @@ app.post('/api/alipay/notify', async (req, res) => {
     return res.send('success');
   }
 
-  const v = await tryVerifyAlipayNotify(postData);
+  const v = tryVerifyAlipayNotify(postData);
   if (!v.ok) {
     console.warn('[alipay notify] verify failed:', v.error);
     return res.status(400).send('fail');
@@ -155,16 +198,17 @@ app.post('/api/alipay/notify', async (req, res) => {
     return res.send('success');
   }
 
-  const order = orders.get(outTradeNo);
-  if (order) {
-    order.status = 'paid';
-    order.paidAt = Date.now();
-    order.alipayTradeNo = postData.trade_no || '';
-    order.unlockToken = buildUnlockToken(order);
-    orders.set(order.id, order);
-    persistOrders();
+  const order = orders.get(String(outTradeNo || ''));
+  if (!order) {
+    console.warn('[alipay notify] unknown out_trade_no:', outTradeNo);
+    return res.send('success');
   }
-
+  order.status = 'paid';
+  order.paidAt = Date.now();
+  order.alipayTradeNo = postData.trade_no || '';
+  order.unlockToken = buildUnlockToken(order);
+  orders.set(order.id, order);
+  persistOrders();
   res.send('success');
 });
 
@@ -184,6 +228,16 @@ app.post('/api/unlock/verify', (req, res) => {
     }
   }
   res.status(400).json({ ok: false, error: '令牌无效或 digest 不匹配' });
+});
+
+app.get('/pay/return', (req, res) => {
+  const orderId = String(req.query.orderId || '');
+  res.type('html').send(`<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"/><title>支付返回</title></head>
+<body style="font-family:sans-serif;padding:2rem;max-width:520px;">
+<h2>支付已提交</h2>
+<p>若您已在支付宝完成付款，请返回 <strong>PlantUML 本地工作室</strong>，点击 <strong>「我已完成支付」</strong> 拉取解锁状态。</p>
+<p style="font-size:0.85rem;color:#666;">订单号：<code>${orderId || '—'}</code></p>
+</body></html>`);
 });
 
 /** 模拟收银台（仅 MOCK_PAY） */
@@ -227,12 +281,6 @@ app.get('/mock-pay/done', (req, res) => {
 <p>订单号：<code>${orderId}</code></p>
 ${o?.unlockToken ? `<p style="word-break:break-all;">调试令牌：<code>${o.unlockToken}</code></p>` : ''}
 </body></html>`);
-});
-
-app.get('/pay/alipay-placeholder', (_req, res) => {
-  res.type('html').send(
-    '<!DOCTYPE html><html><body style="padding:2rem;font-family:sans-serif"><h2>支付宝收银台占位</h2><p>请在服务器上补全「手机网站支付」或「电脑网站支付」下单逻辑，将用户重定向到支付宝官方页面。</p><p>参考：<code>alipay-sdk</code> 文档与开放平台密钥配置。</p></body></html>'
-  );
 });
 
 /** GitHub Actions：推送发布元数据（Bearer Token） */

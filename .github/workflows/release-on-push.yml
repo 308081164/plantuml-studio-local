@@ -115,3 +115,43 @@ jobs:
             -H "Authorization: Bearer ${STUDIO_RELEASE_INJECT_TOKEN}" \
             -H "Content-Type: application/json" \
             -d "$BODY"
+
+  deploy-pay-server:
+    needs: [build-and-release, update-infra-release-meta]
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' ||
+      (github.event.head_commit != null &&
+      !contains(github.event.head_commit.message, '[skip ci]') &&
+      !contains(github.event.head_commit.message, '[ci skip]')) }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_SECRET }}
+
+      - name: Deploy server directory and restart Docker
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+        run: |
+          set -e
+          if [ -z "${SSH_HOST}" ]; then
+            echo "未配置 SSH_HOST，跳过服务端部署。"
+            exit 0
+          fi
+          USER="${SSH_USER:-root}"
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          ssh-keyscan -H "${SSH_HOST}" >> ~/.ssh/known_hosts
+          DEST="${USER}@${SSH_HOST}:~/plantuml-pay-server/"
+          rsync -avz -e ssh --delete \
+            --exclude node_modules \
+            --exclude data \
+            --exclude .env \
+            ./server/ "${DEST}"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "${USER}@${SSH_HOST}" \
+            "set -e; cd ~/plantuml-pay-server && docker compose up -d --build"

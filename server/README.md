@@ -4,13 +4,11 @@
 
 ## CI/CD 当前会部署后端吗？
 
-**不会。** 仓库里的 GitHub Actions（`.github/workflows/release-on-push.yml`）只做：
+**会（在推送 `main` 且 Release 流水线成功时）。**  
+工作流 `deploy-pay-server` 在构建与可选的「发布元数据」步骤之后执行：通过 **SSH + rsync** 将仓库内 **`server/`** 同步到服务器 **`~/plantuml-pay-server/`**，并执行 **`docker compose up -d --build`**。  
+需在 GitHub Actions Secrets 中配置 **`SSH_HOST`**、**`SSH_SECRET`**（OpenSSH 私钥全文），可选 **`SSH_USER`**（默认 `root`）。未配置 `SSH_HOST` 时该步骤会跳过。
 
-1. 在 Windows 上构建 Electron 安装包并发布到 **GitHub Releases**  
-2. 可选：向你在 Secret 里配置的 `STUDIO_RELEASE_INJECT_URL` **POST 一段 JSON**（发布元数据）
-
-**没有任何步骤**会把 `server/` 自动拷贝到你的云主机或自动执行 `docker compose`。  
-若需要「推送 main 后自动部署 Docker」，需另行增加 Job（例如 SSH 到服务器执行 `git pull && docker compose up -d --build`），并配置 `SSH_HOST` / 密钥等 Secret。
+详见仓库根目录 **`docs/github-actions-secrets.md`**。
 
 ---
 

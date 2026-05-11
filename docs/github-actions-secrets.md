@@ -29,6 +29,9 @@
 | `STUDIO_RELEASE_INJECT_TOKEN` | 与 GitHub Secret `STUDIO_RELEASE_INJECT_TOKEN` 相同 |
 | `MOCK_PAY` | 开发联调设为 `1`；正式对接支付宝后改为 `0` 并配置下方支付宝变量 |
 | `UNLOCK_PEPPER` | 可选，用于派生 `unlockToken` 的盐 |
+| `PUBLIC_BASE_URL` | 外网根地址（须含协议与端口或反代路径），用于支付宝 `notify_url` / `return_url`，生产建议 **HTTPS** |
+| `ALIPAY_KEY_TYPE` | 可选，`PKCS1` 或 `PKCS8`（默认 PKCS8） |
+| `TRUST_PROXY` | 置于反代后若需识别 `https`，设为 `1` |
 
 ### 支付宝（正式收款）
 
@@ -46,13 +49,29 @@
 1. 登录开放平台 → 控制台 → 创建应用 → 添加「手机网站支付」等能力。  
 2. 「开发信息」中设置接口加签方式（RSA2），上传「应用公钥」后，保存平台返回的「支付宝公钥」→ 填入 `ALIPAY_PUBLIC_KEY`。  
 3. 你本地用工具生成的 PKCS8 私钥 → 填入 `ALIPAY_APP_PRIVATE_KEY`。  
-4. 在应用内配置「授权回调地址」与「应用网关」等（按所选产品文档）。
+4. 在开放平台「应用信息」中配置 **授权回调地址**（与 `PUBLIC_BASE_URL` + 路径一致，外网可访问），异步通知指向 `https://你的域名/api/alipay/notify`。
 
-当前仓库内 `server/index.mjs` 已实现 **异步通知路由** `/api/alipay/notify` 与验签骨架；**调起支付的真实 `payUrl`** 需你按产品文档在服务端补全 `alipay-sdk` 下单逻辑（占位页见 `/pay/alipay-placeholder`）。
+当前 `server/index.mjs` 已实现 **电脑网站支付** `alipay.trade.page.pay`（返回 `payUrl`）、**同步跳转页** `/pay/return` 与 **异步通知** `/api/alipay/notify`（`checkNotifySignV2` / `checkNotifySign` 验签）。
 
 ---
 
-## 3. 客户端指向支付服务（可选）
+## 3. SSH 自动部署支付服务（工作流 `deploy-pay-server`）
+
+在 Release 构建及可选的「发布元数据」步骤完成后，Runner 会通过 **SSH + rsync** 将仓库内 **`server/`** 目录同步到服务器 `~/plantuml-pay-server/`，并执行 **`docker compose up -d --build`**。
+
+| Secret / Variable | 必填 | 说明 |
+|-------------------|------|------|
+| `SSH_HOST` | 部署时必填 | 服务器 IP 或域名（**不要**带 `http://`） |
+| `SSH_SECRET` | 部署时必填 | **OpenSSH 私钥全文**（`-----BEGIN ... PRIVATE KEY-----` …），用于 `webfactory/ssh-agent`；**不是** root 登录密码 |
+| `SSH_USER` | 可选 | 登录用户名，未配置时默认为 **`root`** |
+
+若未配置 `SSH_HOST`，该 Job 会跳过部署且不报错。
+
+**服务器需预先**：安装 Docker 与 Docker Compose 插件；在 `~/plantuml-pay-server/` 首次可手动放一份 **`server/.env`**（含支付宝密钥，勿经 CI 上传）。CI 的 rsync 已 **`--exclude .env`**，避免覆盖线上密钥。
+
+---
+
+## 4. 客户端指向支付服务（可选）
 
 Electron 主进程默认请求 `http://39.105.11.3:8848`（可通过环境变量覆盖）：
 
@@ -61,14 +80,6 @@ Electron 主进程默认请求 `http://39.105.11.3:8848`（可通过环境变量
 | `STUDIO_PAY_API_BASE` | 例如 `http://39.105.11.3:8848`，不要末尾 `/` |
 
 打包后的用户机器可在启动脚本或快捷方式上设置该变量，指向你的正式 HTTPS 域名。
-
----
-
-## 4. SSH 部署服务器（不推荐把 root 密码放进 GitHub）
-
-若希望通过 CI **SSH 上传构建产物**，建议使用 **SSH 私钥**（如 `DEPLOY_SSH_KEY`）+ `known_hosts`，**不要**把明文 root 密码写入 `Secrets`。
-
-日常运维登录服务器请用密钥或堡垒机，与 CI 解耦。
 
 ---
 
@@ -82,4 +93,5 @@ Electron 主进程默认请求 `http://39.105.11.3:8848`（可通过环境变量
 | `ALIPAY_APP_PRIVATE_KEY` | 应用私钥 PEM（极敏感，优先只放在自建服务器） |
 | `ALIPAY_PUBLIC_KEY` | 支付宝公钥（验签） |
 
-本仓库默认设计：**私钥只部署在 39.105.11.3 的 Node 服务上**，GitHub 只推送发布元数据（Bearer Token），降低泄露面。
+本仓库默认设计：**私钥只部署在自建服务器的 `server/.env` 中**，GitHub Actions 不保存支付宝私钥；GitHub 侧可配置 `SSH_*` 与发布元数据 Token 以完成部署与版本信息上报。
+
