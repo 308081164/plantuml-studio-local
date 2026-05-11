@@ -5,6 +5,7 @@
  * 切勿将服务器 root 密码写入仓库；部署请用 SSH 密钥或受控面板。
  */
 
+import dotenv from 'dotenv';
 import express from 'express';
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
@@ -12,6 +13,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: join(__dirname, '.env') });
 const DATA_DIR = process.env.STUDIO_SERVER_DATA_DIR || join(__dirname, 'data');
 const ORDERS_FILE = join(DATA_DIR, 'orders.json');
 const RELEASE_FILE = join(DATA_DIR, 'latest-github-release.json');

@@ -1,0 +1,19 @@
+# 在「本文件所在目录」执行: docker compose up -d
+# 敏感信息放在与本文件同目录的 .env（勿提交 git）
+
+services:
+  studio-pay-server:
+    build: .
+    image: plantuml-studio-pay-server:latest
+    restart: unless-stopped
+    ports:
+      - "8848:8848"
+    env_file:
+      - .env
+    environment:
+      STUDIO_SERVER_DATA_DIR: /app/data
+    volumes:
+      - studio_pay_data:/app/data
+
+volumes:
+  studio_pay_data:
