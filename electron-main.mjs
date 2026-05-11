@@ -1817,6 +1817,23 @@ function registerIpcHandlers() {
     return { ok: true };
   });
 
+  /**
+   * 临时方案：未接支付宝网关时，在客户端本地直接视为支付成功并解除智能生成锁定。
+   * 正式接入支付宝后可改为由服务器验签下发 unlockToken；届时可移除此 IPC 或加环境变量开关。
+   */
+  ipcMain.handle('studio:pay-local-mock-complete', () => {
+    try {
+      if (!agentSessionLock?.active) {
+        return { ok: false, error: '当前无锁定会话' };
+      }
+      const plain = agentSessionLock.realSource;
+      clearAgentSessionLock();
+      return { ok: true, source: plain };
+    } catch (e) {
+      return { ok: false, error: String(e.message || e) };
+    }
+  });
+
   ipcMain.handle('studio:license-deactivate', () => {
     try {
       const p = getLicensePath(app.getPath('userData'));

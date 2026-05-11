@@ -95,4 +95,5 @@ contextBridge.exposeInMainWorld('studio', {
   payPollStatus: (orderId) => ipcRenderer.invoke('studio:pay-poll-status', { orderId }),
   payRedeemUnlock: (unlockToken) => ipcRenderer.invoke('studio:pay-redeem-unlock', { unlockToken }),
   payOpenExternal: (url) => ipcRenderer.invoke('studio:pay-open-external', { url }),
+  payLocalMockComplete: () => ipcRenderer.invoke('studio:pay-local-mock-complete'),
 });

@@ -137,12 +137,33 @@ function setPreviewLockOverlay(show) {
 }
 
 function updatePayUnlockButtonsVisible(locked) {
-  ['btn-pay-unlock', 'btn-pay-done'].forEach((id) => {
+  ['btn-pay-mock-local', 'btn-pay-unlock', 'btn-pay-done'].forEach((id) => {
     const b = $(id);
     if (!b) return;
     if (locked) b.classList.remove('hidden');
     else b.classList.add('hidden');
   });
+}
+
+async function applyUnlockedSource(r, statusMsg) {
+  pendingPayOrderId = '';
+  $('source').value = r.source || '';
+  $('source').readOnly = false;
+  document.body.classList.remove('studio-agent-source-locked');
+  setPreviewLockOverlay(false);
+  updatePayUnlockButtonsVisible(false);
+  setStatus(statusMsg || '已恢复源码与导出能力', true);
+  await render();
+}
+
+async function runLocalMockPaySuccess() {
+  if (!window.studio?.payLocalMockComplete) return;
+  const r = await window.studio.payLocalMockComplete();
+  if (!r?.ok) {
+    setStatus(r?.error || '本地模拟解锁失败', false);
+    return;
+  }
+  await applyUnlockedSource(r, '本地模拟：已解除锁定，可正常导出与暂存');
 }
 
 async function beginPayUnlockFlow() {
@@ -159,8 +180,10 @@ async function beginPayUnlockFlow() {
       setStatus(openR.error || '无法打开浏览器', false);
       return;
     }
+    setStatus('若已打开支付页，完成支付后请点击「我已完成支付」', null);
+  } else {
+    setStatus('未返回支付链接（可能未启动支付服务）。可点击「本地模拟支付成功」临时解锁。', null);
   }
-  setStatus('若已打开支付页，完成支付后请点击「我已完成支付」', null);
 }
 
 async function confirmPayCompleted() {
@@ -184,14 +207,7 @@ async function confirmPayCompleted() {
     setStatus(r?.error || '解锁失败', false);
     return;
   }
-  pendingPayOrderId = '';
-  $('source').value = r.source || '';
-  $('source').readOnly = false;
-  document.body.classList.remove('studio-agent-source-locked');
-  setPreviewLockOverlay(false);
-  updatePayUnlockButtonsVisible(false);
-  setStatus('支付校验成功，已恢复源码与导出能力', true);
-  await render();
+  await applyUnlockedSource(r, '支付校验成功，已恢复源码与导出能力');
 }
 
 function recordSessionExecutionLog(body) {
@@ -1355,6 +1371,7 @@ function init() {
   $('source').value = DEFAULT_SOURCE;
   $('btn-render').addEventListener('click', () => render());
   $('btn-export').addEventListener('click', () => exportFile());
+  $('btn-pay-mock-local')?.addEventListener('click', () => runLocalMockPaySuccess());
   $('btn-pay-unlock')?.addEventListener('click', () => beginPayUnlockFlow());
   $('btn-pay-done')?.addEventListener('click', () => confirmPayCompleted());
 
