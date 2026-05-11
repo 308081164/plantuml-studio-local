@@ -372,18 +372,21 @@ function openStashAddDialog() {
   const dlg = $('stash-add-dialog');
   const nameInput = $('stash-add-name');
   const folderSelect = $('stash-add-folder');
-  
+
   nameInput.value = '';
   folderSelect.innerHTML = '<option value="">暂存区根目录</option>';
-  
+
   stashFolders.forEach(folder => {
     const option = document.createElement('option');
     option.value = folder.id;
     option.textContent = folder.name;
     folderSelect.appendChild(option);
   });
-  
+
   dlg.showModal();
+  requestAnimationFrame(() => {
+    nameInput.focus();
+  });
 }
 
 async function addCurrentToStashWithFolder() {
@@ -671,7 +674,20 @@ function enterEditMode() {
   btn.classList.add('active');
 
   const previewWrap = $('preview-wrap');
-  const editor = new MxGraphEditor(previewWrap);
+  const svgWrap = $('preview-svg');
+  const imgEl = $('preview-img');
+  const ph = $('preview-placeholder');
+
+  ph.classList.add('hidden');
+  imgEl.classList.add('hidden');
+  svgWrap.classList.add('hidden');
+
+  const host = document.createElement('div');
+  host.id = 'mx-graph-editor-host';
+  host.className = 'mx-graph-editor-host';
+  previewWrap.appendChild(host);
+
+  const editor = new MxGraphEditor(host);
 
   editor.onExportCallback = (data) => {
     if (data.kind === 'svg') {
@@ -691,6 +707,26 @@ function enterEditMode() {
   }).catch(err => {
     console.error('Failed to init mxGraph:', err);
     setStatus('画板编辑器初始化失败: ' + err.message, false);
+    isInEditMode = false;
+    btn.textContent = '进入画板';
+    btn.classList.remove('active');
+    $('mx-graph-editor-host')?.remove();
+    const svgWrap = $('preview-svg');
+    const imgEl = $('preview-img');
+    const ph = $('preview-placeholder');
+    if (svgWrap.querySelector('svg')) {
+      svgWrap.classList.remove('hidden');
+      ph.classList.add('hidden');
+      imgEl.classList.add('hidden');
+    } else if (imgEl.getAttribute('src')) {
+      imgEl.classList.remove('hidden');
+      ph.classList.add('hidden');
+      svgWrap.classList.add('hidden');
+    } else {
+      ph.classList.remove('hidden');
+      svgWrap.classList.add('hidden');
+      imgEl.classList.add('hidden');
+    }
   });
 
   setStatus('已进入画板编辑模式，可拖拽调整元素位置', true);
@@ -705,6 +741,26 @@ function exitEditMode() {
   if (svgEditor) {
     svgEditor.destroy();
     svgEditor = null;
+  }
+
+  const host = $('mx-graph-editor-host');
+  host?.remove();
+
+  const svgWrap = $('preview-svg');
+  const imgEl = $('preview-img');
+  const ph = $('preview-placeholder');
+  if (svgWrap.querySelector('svg')) {
+    svgWrap.classList.remove('hidden');
+    ph.classList.add('hidden');
+    imgEl.classList.add('hidden');
+  } else if (imgEl.getAttribute('src')) {
+    imgEl.classList.remove('hidden');
+    ph.classList.add('hidden');
+    svgWrap.classList.add('hidden');
+  } else {
+    ph.classList.remove('hidden');
+    svgWrap.classList.add('hidden');
+    imgEl.classList.add('hidden');
   }
 
   setStatus('已退出画板编辑模式', true);
@@ -846,6 +902,9 @@ async function createStashFolder() {
   const nameInput = $('stash-folder-name');
   nameInput.value = '';
   dlg.showModal();
+  requestAnimationFrame(() => {
+    nameInput.focus();
+  });
 }
 
 async function confirmCreateStashFolder() {

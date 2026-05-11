@@ -14,6 +14,41 @@ class MxGraphEditor {
     this.lastMouseX = 0;
     this.lastMouseY = 0;
     this.toolbar = null;
+    /** @type {Array<() => void>} */
+    this._cleanups = [];
+    this._resizeHandler = null;
+    this._toolbarDragState = { isDragging: false, startX: 0, startY: 0, initialX: 0, initialY: 0 };
+    /** destroy() 后置为 true，供全局监听在未移除前短路 */
+    this._released = false;
+  }
+
+  _addCleanup(fn) {
+    if (typeof fn === 'function') this._cleanups.push(fn);
+  }
+
+  _runCleanups() {
+    while (this._cleanups.length) {
+      const fn = this._cleanups.pop();
+      try {
+        fn();
+      } catch (e) {
+        console.warn('MxGraphEditor cleanup:', e);
+      }
+    }
+  }
+
+  /**
+   * 表单控件、可编辑区或已打开的 dialog 内的键盘事件不应由画板全局快捷键处理。
+   * @param {EventTarget | null} target
+   */
+  shouldIgnoreHostShortcuts(target) {
+    if (!target) return false;
+    const el = /** @type {HTMLElement} */ (target);
+    const tag = el.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'OPTION') return true;
+    if (el.isContentEditable) return true;
+    if (typeof el.closest === 'function' && el.closest('dialog[open]')) return true;
+    return false;
   }
 
   async init() {
@@ -221,9 +256,17 @@ class MxGraphEditor {
       }
     });
 
-    mx.mxEvent.addListener(window, 'resize', () => {
+    this._resizeHandler = () => {
       if (this.graph) {
         this.graph.sizeDidChange();
+      }
+    };
+    mx.mxEvent.addListener(window, 'resize', this._resizeHandler);
+    this._addCleanup(() => {
+      try {
+        mx.mxEvent.removeListener(window, 'resize', this._resizeHandler);
+      } catch (e) {
+        /* ignore */
       }
     });
   }
@@ -231,31 +274,39 @@ class MxGraphEditor {
   setupKeyboardShortcuts() {
     const container = this.container;
 
-    document.addEventListener('keydown', (e) => {
+    const onSpaceKeydown = (e) => {
+      if (this._released) return;
+      if (this.shouldIgnoreHostShortcuts(e.target)) return;
       if (e.code === 'Space' && !this.isSpacePressed) {
         e.preventDefault();
         this.isSpacePressed = true;
         container.style.cursor = 'grab';
       }
-    });
+    };
+    document.addEventListener('keydown', onSpaceKeydown);
+    this._addCleanup(() => document.removeEventListener('keydown', onSpaceKeydown));
 
-    document.addEventListener('keyup', (e) => {
+    const onSpaceKeyup = (e) => {
+      if (this._released) return;
+      if (this.shouldIgnoreHostShortcuts(e.target)) return;
       if (e.code === 'Space') {
         e.preventDefault();
         this.isSpacePressed = false;
         this.isPanning = false;
         container.style.cursor = 'default';
       }
-    });
+    };
+    document.addEventListener('keyup', onSpaceKeyup);
+    this._addCleanup(() => document.removeEventListener('keyup', onSpaceKeyup));
 
-    document.addEventListener('keydown', (e) => {
-      if (!this.graph || !this.isInitialized) return;
-      
-      if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+    const onCaptureKeydown = (e) => {
+      if (this._released || !this.graph) return;
+      if (this.shouldIgnoreHostShortcuts(e.target)) return;
 
       const ctrlOrCmd = e.ctrlKey || e.metaKey;
 
       if (ctrlOrCmd) {
+        const mxRef = window.mxClient || window;
         switch (e.key.toLowerCase()) {
           case 'z':
             e.preventDefault();
@@ -275,45 +326,42 @@ class MxGraphEditor {
               this.graph.getModel().redo();
             }
             break;
-          case 'c':
+          case 'c': {
             e.preventDefault();
             e.stopPropagation();
             const cellsCopy = this.graph.getSelectionCells();
-            if (cellsCopy.length > 0) {
-              const mx = window.mxClient || window;
-              if (mx.mxClipboard) {
-                if (typeof mx.mxClipboard.copy === 'function') {
-                  mx.mxClipboard.copy(cellsCopy);
-                } else if (typeof mx.mxClipboard.putCells === 'function') {
-                  mx.mxClipboard.putCells(cellsCopy);
-                } else if (typeof mx.mxClipboard.setData === 'function') {
-                  const encoder = new mx.mxCodec();
-                  const xml = encoder.encode(cellsCopy);
-                  mx.mxClipboard.setData(xml);
-                }
+            if (cellsCopy.length > 0 && mxRef.mxClipboard) {
+              if (typeof mxRef.mxClipboard.copy === 'function') {
+                mxRef.mxClipboard.copy(cellsCopy);
+              } else if (typeof mxRef.mxClipboard.putCells === 'function') {
+                mxRef.mxClipboard.putCells(cellsCopy);
+              } else if (typeof mxRef.mxClipboard.setData === 'function') {
+                const encoder = new mxRef.mxCodec();
+                const xml = encoder.encode(cellsCopy);
+                mxRef.mxClipboard.setData(xml);
               }
             }
             break;
-          case 'v':
+          }
+          case 'v': {
             e.preventDefault();
             e.stopPropagation();
-            const mx = window.mxClient || window;
-            if (mx.mxClipboard) {
+            if (mxRef.mxClipboard) {
               const parent = this.graph.getDefaultParent();
               const model = this.graph.getModel();
               model.beginUpdate();
               try {
                 let cells = null;
-                if (typeof mx.mxClipboard.getCells === 'function') {
-                  cells = mx.mxClipboard.getCells();
-                } else if (typeof mx.mxClipboard.getData === 'function') {
-                  const data = mx.mxClipboard.getData();
+                if (typeof mxRef.mxClipboard.getCells === 'function') {
+                  cells = mxRef.mxClipboard.getCells();
+                } else if (typeof mxRef.mxClipboard.getData === 'function') {
+                  const data = mxRef.mxClipboard.getData();
                   if (data) {
-                    const decoder = new mx.mxCodec();
+                    const decoder = new mxRef.mxCodec();
                     cells = decoder.decode(data);
                   }
                 }
-                
+
                 if (cells && cells.length > 0) {
                   const clones = [];
                   for (let i = 0; i < cells.length; i++) {
@@ -330,19 +378,18 @@ class MxGraphEditor {
               }
             }
             break;
-          case 'x':
+          }
+          case 'x': {
             e.preventDefault();
             e.stopPropagation();
             const cellsCut = this.graph.getSelectionCells();
-            if (cellsCut.length > 0) {
-              const mx = window.mxClient || window;
-              if (mx.mxClipboard && typeof mx.mxClipboard.copy === 'function') {
-                mx.mxClipboard.copy(cellsCut);
-              }
+            if (cellsCut.length > 0 && mxRef.mxClipboard && typeof mxRef.mxClipboard.copy === 'function') {
+              mxRef.mxClipboard.copy(cellsCut);
               this.graph.removeCells(cellsCut);
             }
             break;
-          case 'a':
+          }
+          case 'a': {
             e.preventDefault();
             e.stopPropagation();
             const parent = this.graph.getDefaultParent();
@@ -358,15 +405,19 @@ class MxGraphEditor {
               this.graph.setSelectionCells(allCells);
             }
             break;
+          }
         }
       }
-    }, true);
+    };
+    document.addEventListener('keydown', onCaptureKeydown, true);
+    this._addCleanup(() => document.removeEventListener('keydown', onCaptureKeydown, true));
   }
 
   setupSpacePan() {
     const container = this.container;
 
-    container.addEventListener('mousedown', (e) => {
+    const onMouseDown = (e) => {
+      if (this._released) return;
       if (this.isSpacePressed) {
         e.preventDefault();
         this.isPanning = true;
@@ -374,9 +425,12 @@ class MxGraphEditor {
         this.lastMouseY = e.clientY;
         container.style.cursor = 'grabbing';
       }
-    });
+    };
+    container.addEventListener('mousedown', onMouseDown);
+    this._addCleanup(() => container.removeEventListener('mousedown', onMouseDown));
 
-    container.addEventListener('mousemove', (e) => {
+    const onMouseMove = (e) => {
+      if (this._released) return;
       if (this.isPanning) {
         e.preventDefault();
         const dx = e.clientX - this.lastMouseX;
@@ -392,23 +446,31 @@ class MxGraphEditor {
           container.scrollTop -= dy;
         }
       }
-    });
+    };
+    container.addEventListener('mousemove', onMouseMove);
+    this._addCleanup(() => container.removeEventListener('mousemove', onMouseMove));
 
-    container.addEventListener('mouseup', () => {
+    const onMouseUp = () => {
+      if (this._released) return;
       if (this.isPanning) {
         this.isPanning = false;
         container.style.cursor = this.isSpacePressed ? 'grab' : 'default';
       }
-    });
+    };
+    container.addEventListener('mouseup', onMouseUp);
+    this._addCleanup(() => container.removeEventListener('mouseup', onMouseUp));
 
-    container.addEventListener('mouseleave', () => {
+    const onMouseLeave = () => {
+      if (this._released) return;
       if (this.isPanning) {
         this.isPanning = false;
         if (this.isSpacePressed) {
           container.style.cursor = 'grab';
         }
       }
-    });
+    };
+    container.addEventListener('mouseleave', onMouseLeave);
+    this._addCleanup(() => container.removeEventListener('mouseleave', onMouseLeave));
   }
 
   setupToolbar() {
@@ -460,32 +522,33 @@ class MxGraphEditor {
 
   makeToolbarDraggable() {
     const toolbar = this.toolbar;
-    let isDragging = false;
-    let startX, startY, initialX, initialY;
+    const st = this._toolbarDragState;
 
-    toolbar.addEventListener('mousedown', (e) => {
+    const onToolbarMouseDown = (e) => {
       if (e.target.tagName === 'BUTTON') return;
 
-      isDragging = true;
-      startX = e.clientX;
-      startY = e.clientY;
+      st.isDragging = true;
+      st.startX = e.clientX;
+      st.startY = e.clientY;
 
       const rect = toolbar.getBoundingClientRect();
-      initialX = rect.left;
-      initialY = rect.top;
+      st.initialX = rect.left;
+      st.initialY = rect.top;
 
       toolbar.style.cursor = 'grabbing';
       e.preventDefault();
-    });
+    };
+    toolbar.addEventListener('mousedown', onToolbarMouseDown);
+    this._addCleanup(() => toolbar.removeEventListener('mousedown', onToolbarMouseDown));
 
-    document.addEventListener('mousemove', (e) => {
-      if (!isDragging) return;
+    const onDocMouseMove = (e) => {
+      if (this._released || !st.isDragging) return;
 
-      const dx = e.clientX - startX;
-      const dy = e.clientY - startY;
+      const dx = e.clientX - st.startX;
+      const dy = e.clientY - st.startY;
 
-      let newX = initialX + dx;
-      let newY = initialY + dy;
+      let newX = st.initialX + dx;
+      let newY = st.initialY + dy;
 
       const containerRect = this.container.getBoundingClientRect();
       const toolbarRect = toolbar.getBoundingClientRect();
@@ -496,14 +559,18 @@ class MxGraphEditor {
       toolbar.style.left = newX + 'px';
       toolbar.style.top = newY + 'px';
       toolbar.style.right = 'auto';
-    });
+    };
+    document.addEventListener('mousemove', onDocMouseMove);
+    this._addCleanup(() => document.removeEventListener('mousemove', onDocMouseMove));
 
-    document.addEventListener('mouseup', () => {
-      if (isDragging) {
-        isDragging = false;
-        toolbar.style.cursor = 'move';
+    const onDocMouseUp = () => {
+      if (st.isDragging) {
+        st.isDragging = false;
+        if (toolbar) toolbar.style.cursor = 'move';
       }
-    });
+    };
+    document.addEventListener('mouseup', onDocMouseUp);
+    this._addCleanup(() => document.removeEventListener('mouseup', onDocMouseUp));
   }
 
   bindToolbarEvents() {
@@ -576,9 +643,10 @@ class MxGraphEditor {
       fullscreenBtn.addEventListener('click', () => this.toggleFullscreen());
     }
 
-    document.addEventListener('keydown', (e) => {
-      if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
-      
+    const onToolbarShortcutsKeydown = (e) => {
+      if (this._released) return;
+      if (this.shouldIgnoreHostShortcuts(e.target)) return;
+
       if (e.key === '+' || e.key === '=') {
         this.zoomIn();
       } else if (e.key === '-') {
@@ -599,7 +667,9 @@ class MxGraphEditor {
       } else if (e.key === 'f' || e.key === 'F') {
         this.toggleFullscreen();
       }
-    });
+    };
+    document.addEventListener('keydown', onToolbarShortcutsKeydown);
+    this._addCleanup(() => document.removeEventListener('keydown', onToolbarShortcutsKeydown));
   }
 
   zoomIn() {
@@ -811,13 +881,26 @@ class MxGraphEditor {
   }
 
   destroy() {
+    this._released = true;
+    this.isSpacePressed = false;
+    this.isPanning = false;
+    this._toolbarDragState.isDragging = false;
+    this._runCleanups();
+
     if (this.toolbar) {
       this.toolbar.remove();
       this.toolbar = null;
     }
     if (this.graph) {
-      this.graph.destroy();
+      try {
+        this.graph.destroy();
+      } catch (e) {
+        console.warn('mxGraph destroy:', e);
+      }
       this.graph = null;
+    }
+    if (this.container) {
+      this.container.style.cursor = '';
     }
     this.isInitialized = false;
   }
