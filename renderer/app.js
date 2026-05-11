@@ -1,3 +1,5 @@
+import { isLockedPlaceholderText } from '../scripts/agent-session-lock.mjs';
+
 const DEFAULT_SOURCE = `@startuml
 title 示例
 Alice -> Bob : 本地渲染
@@ -108,6 +110,90 @@ function reportErrorArchive(kind, message, detail = '') {
   });
 }
 
+let pendingPayOrderId = '';
+
+async function getEffectivePlantumlBundle() {
+  if (window.studio?.getEffectivePlantumlSource) {
+    const r = await window.studio.getEffectivePlantumlSource({ editorText: $('source').value });
+    if (r?.ok) return { source: r.source, locked: Boolean(r.locked) };
+  }
+  return { source: $('source').value, locked: false };
+}
+
+async function isUiAgentLocked() {
+  if (!window.studio?.agentLockGet) return false;
+  try {
+    const r = await window.studio.agentLockGet();
+    return Boolean(r?.active);
+  } catch {
+    return false;
+  }
+}
+
+function setPreviewLockOverlay(show) {
+  const el = $('preview-free-overlay');
+  if (!el) return;
+  el.classList.toggle('hidden', !show);
+}
+
+function updatePayUnlockButtonsVisible(locked) {
+  ['btn-pay-unlock', 'btn-pay-done'].forEach((id) => {
+    const b = $(id);
+    if (!b) return;
+    if (locked) b.classList.remove('hidden');
+    else b.classList.add('hidden');
+  });
+}
+
+async function beginPayUnlockFlow() {
+  if (!window.studio?.payOrderCreate) return;
+  const cr = await window.studio.payOrderCreate();
+  if (!cr?.ok) {
+    setStatus(cr?.error || '创建支付订单失败', false);
+    return;
+  }
+  pendingPayOrderId = cr.orderId || '';
+  if (cr.payUrl && window.studio.payOpenExternal) {
+    const openR = await window.studio.payOpenExternal(cr.payUrl);
+    if (openR && openR.ok === false) {
+      setStatus(openR.error || '无法打开浏览器', false);
+      return;
+    }
+  }
+  setStatus('若已打开支付页，完成支付后请点击「我已完成支付」', null);
+}
+
+async function confirmPayCompleted() {
+  if (!window.studio?.payPollStatus || !window.studio?.payRedeemUnlock) return;
+  const id = pendingPayOrderId;
+  if (!id) {
+    setStatus('请先点击「支付解锁本条」生成订单', false);
+    return;
+  }
+  const st = await window.studio.payPollStatus(id);
+  if (!st?.ok) {
+    setStatus(st?.error || '查询订单失败', false);
+    return;
+  }
+  if (st.status !== 'paid' || !st.unlockToken) {
+    setStatus('尚未检测到支付成功，请稍后再试或检查网络', false);
+    return;
+  }
+  const r = await window.studio.payRedeemUnlock(st.unlockToken);
+  if (!r?.ok) {
+    setStatus(r?.error || '解锁失败', false);
+    return;
+  }
+  pendingPayOrderId = '';
+  $('source').value = r.source || '';
+  $('source').readOnly = false;
+  document.body.classList.remove('studio-agent-source-locked');
+  setPreviewLockOverlay(false);
+  updatePayUnlockButtonsVisible(false);
+  setStatus('支付校验成功，已恢复源码与导出能力', true);
+  await render();
+}
+
 function recordSessionExecutionLog(body) {
   const ts = new Date().toLocaleString('zh-CN', { hour12: false });
   lastSessionExecutionLog = `── 最近一轮 · ${ts} ──\n${String(body || '').trim() || '（无日志）'}`;
@@ -207,12 +293,14 @@ skinparam activity {
 }
 
 async function render() {
-  let source = $('source').value;
+  const bundle = await getEffectivePlantumlBundle();
+  let source = bundle.source;
   const fmt = $('format').value;
   showErrors([]);
   setStatus('渲染中…', null);
 
   source = applyChinaUnivModeIfNeeded(source);
+  setPreviewLockOverlay(Boolean(bundle.locked));
 
   try {
     const base = await getBase();
@@ -270,10 +358,15 @@ async function render() {
 }
 
 async function exportFile() {
-  let source = $('source').value;
+  if (await isUiAgentLocked()) {
+    setStatus('免费版：智能生成锁定状态下无法导出，请先支付解锁或激活专业版。', false);
+    return;
+  }
+  const bundle = await getEffectivePlantumlBundle();
+  let source = bundle.source;
   const fmt = $('format').value;
   setStatus('导出中…', null);
-  
+
   source = applyChinaUnivModeIfNeeded(source);
   
   try {
@@ -310,6 +403,10 @@ function previewHasContent() {
 
 /** 将当前预览以 PNG 写入系统剪贴板（SVG 预览时按当前源码重新渲染 PNG） */
 async function copyPreviewPngToClipboard() {
+  if (await isUiAgentLocked()) {
+    setStatus('免费版：锁定状态下无法复制预览图', false);
+    return;
+  }
   if (!window.studio?.copyPngToClipboard || !window.studio?.renderPngToBuffer) {
     setStatus('剪贴板 API 不可用', false);
     return;
@@ -338,7 +435,8 @@ async function copyPreviewPngToClipboard() {
     }
 
     if (!svgWrap.classList.contains('hidden')) {
-      const source = $('source').value;
+      const bundle = await getEffectivePlantumlBundle();
+      const source = bundle.source;
       const png = await window.studio.renderPngToBuffer(source);
       if (!png?.ok) {
         setStatus(png?.error || '无法从 SVG 模式生成 PNG', false);
@@ -368,7 +466,11 @@ function wirePreviewContextMenu() {
   });
 }
 
-function openStashAddDialog() {
+async function openStashAddDialog() {
+  if (await isUiAgentLocked()) {
+    setStatus('免费版：智能生成锁定状态下无法加入暂存区', false);
+    return;
+  }
   const dlg = $('stash-add-dialog');
   const nameInput = $('stash-add-name');
   const folderSelect = $('stash-add-folder');
@@ -1002,7 +1104,19 @@ function onChinaUnivModeToggle() {
 async function applyAgentRunResult(r) {
   const logText = (r.logs || []).join('\n');
   recordSessionExecutionLog([logText, r.error && !r.ok ? `错误: ${r.error}` : ''].filter(Boolean).join('\n'));
-  if (r.source) $('source').value = r.source;
+  const display = r.displaySource != null ? r.displaySource : r.source;
+  if (display) $('source').value = display;
+  if (r.locked) {
+    document.body.classList.add('studio-agent-source-locked');
+    $('source').readOnly = true;
+    setPreviewLockOverlay(true);
+    updatePayUnlockButtonsVisible(true);
+  } else {
+    document.body.classList.remove('studio-agent-source-locked');
+    $('source').readOnly = false;
+    setPreviewLockOverlay(false);
+    updatePayUnlockButtonsVisible(false);
+  }
   if (r.ok) {
     setStatus('智能生成成功，正在刷新预览…', true);
     await render();
@@ -1056,7 +1170,7 @@ async function pickProjectDirectory() {
   const r = await window.studio.pickProjectDirectory();
   if (r.canceled) return;
   if (!r?.ok) {
-    setStatus(r?.error || '无法选择项目目录：请先完成软件授权激活。', false);
+    setStatus(r?.error || '无法选择项目目录', false);
     return;
   }
   if (!r.path) return;
@@ -1221,12 +1335,51 @@ function wireAgentExpandAdvanced(elId) {
   });
 }
 
+async function syncAgentLockFromMain() {
+  if (await isUiAgentLocked()) {
+    document.body.classList.add('studio-agent-source-locked');
+    $('source').readOnly = true;
+    setPreviewLockOverlay(true);
+    updatePayUnlockButtonsVisible(true);
+  } else {
+    document.body.classList.remove('studio-agent-source-locked');
+    $('source').readOnly = false;
+    setPreviewLockOverlay(false);
+    updatePayUnlockButtonsVisible(false);
+  }
+}
+
 function init() {
   $('china-univ-mode')?.addEventListener('change', () => onChinaUnivModeToggle());
   
   $('source').value = DEFAULT_SOURCE;
   $('btn-render').addEventListener('click', () => render());
   $('btn-export').addEventListener('click', () => exportFile());
+  $('btn-pay-unlock')?.addEventListener('click', () => beginPayUnlockFlow());
+  $('btn-pay-done')?.addEventListener('click', () => confirmPayCompleted());
+
+  let lockOverrideTimer = null;
+  $('source').addEventListener('input', () => {
+    if (!document.body.classList.contains('studio-agent-source-locked')) return;
+    const v = $('source').value;
+    if (isLockedPlaceholderText(v)) return;
+    clearTimeout(lockOverrideTimer);
+    lockOverrideTimer = setTimeout(async () => {
+      if (!window.studio?.agentLockUserOverride) return;
+      const r = await window.studio.agentLockUserOverride({ editorText: $('source').value });
+      if (r?.ok) {
+        $('source').value = r.editorText || '';
+        $('source').readOnly = false;
+        document.body.classList.remove('studio-agent-source-locked');
+        setPreviewLockOverlay(false);
+        updatePayUnlockButtonsVisible(false);
+        pendingPayOrderId = '';
+        setStatus('已改为手写模式，智能生成锁定已解除', true);
+        await render();
+      }
+    }, 500);
+  });
+
   $('format').addEventListener('change', clearPreview);
 
   $('btn-agent-settings').addEventListener('click', () => openAgentSettingsDialog());
@@ -1293,7 +1446,7 @@ function init() {
   }
 
   wireAppDialogs();
-  loadAgentForm();
+  loadAgentForm().then(() => syncAgentLockFromMain());
   refreshStashList().catch(() => {});
 
   wireLicenseDialog();
@@ -1330,7 +1483,8 @@ async function refreshLicenseStatus() {
       $('license-activate-result').classList.add('hidden');
     } else {
       icon.textContent = '🔒';
-      text.textContent = status.error || '未激活';
+      const edition = status.edition === 'pro' ? '专业版' : '免费版';
+      text.textContent = `${status.error || '未激活'}（当前：${edition}）`;
       deviceArea.classList.remove('hidden');
       activateArea.classList.remove('hidden');
       await refreshDeviceInfo();
@@ -1378,6 +1532,7 @@ async function handleLicenseActivate() {
       resultEl.style.color = 'var(--ok)';
       setStatus('授权激活成功', true);
       await refreshLicenseStatus();
+      await syncAgentLockFromMain();
     } else {
       resultEl.textContent = `❌ 激活失败: ${r.error}`;
       resultEl.style.color = 'var(--error)';
@@ -1399,6 +1554,7 @@ async function handleLicenseDeactivate() {
     if (r.ok) {
       setStatus('已卸载激活', true);
       await refreshLicenseStatus();
+      await syncAgentLockFromMain();
     } else {
       setStatus(`卸载失败: ${r.error}`, false);
     }

@@ -87,4 +87,12 @@ contextBridge.exposeInMainWorld('studio', {
   licenseGetStatus: () => ipcRenderer.invoke('studio:license-get-status'),
   licenseActivate: (licenseCode) => ipcRenderer.invoke('studio:license-activate', { licenseCode }),
   licenseDeactivate: () => ipcRenderer.invoke('studio:license-deactivate'),
+  agentLockGet: () => ipcRenderer.invoke('studio:agent-lock-get'),
+  getEffectivePlantumlSource: (payload) => ipcRenderer.invoke('studio:get-effective-plantuml-source', payload),
+  agentLockClear: () => ipcRenderer.invoke('studio:agent-lock-clear'),
+  agentLockUserOverride: (payload) => ipcRenderer.invoke('studio:agent-lock-user-override', payload),
+  payOrderCreate: () => ipcRenderer.invoke('studio:pay-order-create'),
+  payPollStatus: (orderId) => ipcRenderer.invoke('studio:pay-poll-status', { orderId }),
+  payRedeemUnlock: (unlockToken) => ipcRenderer.invoke('studio:pay-redeem-unlock', { unlockToken }),
+  payOpenExternal: (url) => ipcRenderer.invoke('studio:pay-open-external', { url }),
 });

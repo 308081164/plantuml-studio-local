@@ -71,6 +71,8 @@
         <div class="pane-title">
           预览 <span class="pane-sub">右键可复制 PNG 到剪贴板</span>
           <div class="pane-actions">
+            <button type="button" id="btn-pay-unlock" class="ghost hidden" title="支付 0.8 元解锁本条智能生成内容">支付解锁</button>
+            <button type="button" id="btn-pay-done" class="ghost hidden" title="在浏览器完成支付后点此校验">我已完成支付</button>
             <button type="button" id="btn-edit-mode" class="edit-mode-btn" title="进入画板进行图形编辑">
               进入画板
             </button>
@@ -80,6 +82,9 @@
           </div>
         </div>
         <div id="preview-wrap" class="preview-wrap">
+          <div id="preview-free-overlay" class="preview-free-overlay hidden" aria-hidden="true">
+            免费版 · 智能生成 · 含水印预览
+          </div>
           <div id="preview-placeholder" class="placeholder">点击「渲染预览」生成图像</div>
           <div id="preview-svg" class="preview-svg hidden"></div>
           <img id="preview-img" class="preview-img hidden" alt="预览" />

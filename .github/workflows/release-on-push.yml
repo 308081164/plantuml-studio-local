@@ -1,5 +1,6 @@
 # 推送至 main 时：补丁版本 +1 → 提交 [skip ci] → 打 tag → 构建 Windows 安装包 → 发布到 GitHub Releases
 # 构建产物目录与本地一致：releases/（安装包与便携版 .exe 一并上传）
+# 可选：将发布元数据 POST 到自建服务器（见 docs/github-actions-secrets.md）
 
 name: Release on push
 
@@ -24,6 +25,8 @@ jobs:
       !contains(github.event.head_commit.message, '[skip ci]') &&
       !contains(github.event.head_commit.message, '[ci skip]')) }}
     runs-on: windows-latest
+    outputs:
+      new_version: ${{ steps.version_out.outputs.new_version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -38,11 +41,13 @@ jobs:
           cache: npm
 
       - name: Bump patch version
+        id: version_out
         shell: bash
         run: |
           set -e
           V=$(node scripts/ci-bump-version.mjs)
           echo "NEW_VERSION=$V" >> "$GITHUB_ENV"
+          echo "new_version=$V" >> "$GITHUB_OUTPUT"
           echo "Bumped to $V"
 
       - name: Commit version bump and tag
@@ -67,6 +72,7 @@ jobs:
         run: npx electron-builder --win --x64
 
       - name: Upload to GitHub Releases
+        id: gh_release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.NEW_VERSION }}
@@ -77,3 +83,35 @@ jobs:
           files: |
             releases/*.exe
             releases/*.blockmap
+
+  update-infra-release-meta:
+    needs: build-and-release
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' ||
+      (github.event.head_commit != null &&
+      !contains(github.event.head_commit.message, '[skip ci]') &&
+      !contains(github.event.head_commit.message, '[ci skip]')) }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post release metadata to studio server
+        env:
+          STUDIO_RELEASE_INJECT_URL: ${{ secrets.STUDIO_RELEASE_INJECT_URL }}
+          STUDIO_RELEASE_INJECT_TOKEN: ${{ secrets.STUDIO_RELEASE_INJECT_TOKEN }}
+        run: |
+          set -e
+          if [ -z "${STUDIO_RELEASE_INJECT_URL}" ] || [ -z "${STUDIO_RELEASE_INJECT_TOKEN}" ]; then
+            echo "STUDIO_RELEASE_INJECT_URL / STUDIO_RELEASE_INJECT_TOKEN 未配置，跳过服务器元数据更新。"
+            exit 0
+          fi
+          TAG="v${{ needs.build-and-release.outputs.new_version }}"
+          BODY=$(jq -n \
+            --arg repo "${{ github.repository }}" \
+            --arg tag "$TAG" \
+            --arg sha "${{ github.sha }}" \
+            --arg wf "${{ github.workflow }}" \
+            --arg html "https://github.com/${{ github.repository }}/releases/tag/${TAG}" \
+            '{repository:$repo, tag:$tag, sha:$sha, workflow:$wf, html_url:$html}')
+          curl -fsS -X POST "$STUDIO_RELEASE_INJECT_URL" \
+            -H "Authorization: Bearer ${STUDIO_RELEASE_INJECT_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$BODY"

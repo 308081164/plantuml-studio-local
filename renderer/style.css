@@ -382,11 +382,33 @@ button:hover {
 
 .preview-wrap {
   flex: 1;
+  display: flex;
+  flex-direction: column;
   overflow: auto;
   padding: 0.75rem;
   min-height: 200px;
   position: relative;
   background: var(--preview-bg);
+}
+
+.preview-free-overlay {
+  position: absolute;
+  right: 0.75rem;
+  bottom: 0.75rem;
+  z-index: 6;
+  pointer-events: none;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: rgba(89, 99, 110, 0.88);
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.4rem 0.55rem;
+  box-shadow: 0 1px 4px rgba(27, 31, 36, 0.08);
+}
+
+body.studio-agent-source-locked #source {
+  user-select: none;
 }
 
 .placeholder {
