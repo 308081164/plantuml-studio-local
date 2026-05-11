@@ -48,6 +48,8 @@ function preferredSectionNums(intent) {
       return [0, 1, 2, 3, 4, 5, 6, 7, 11];
     case 'gantt':
       return [0, 1, 2, 8, 11];
+    case 'arch_static':
+      return [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
     default:
       return [0, 1, 2, 3, 4, 5, 6, 7, 11];
   }
@@ -178,6 +180,15 @@ export function buildKnowledgeInjection(opts) {
 }
 
 function defaultL0(jarLabel, intent, kbLoaded) {
+  if (intent === 'arch_static') {
+    return [
+      '【L0 护栏 — 静态架构 YAML 模式】',
+      '- 只输出 @studio-arch … @endstudio-arch；块内为纯 YAML，禁止 Markdown 讲解或 fenced 代码块。',
+      '- 不得臆造清单中不存在的路径；focus_paths 必须是清单内 path 的前缀。',
+      '- 标题与 notes 仅描述结构语义；勿引导彩色配图、渐变或高饱和强调色。',
+      `- 知识库：${kbLoaded ? '已加载' : '未加载'}。`,
+    ].join('\n');
+  }
   const jar = jarLabel ? `绑定 JAR：${jarLabel}` : 'JAR 版本未解析';
   const lines = [
     '【L0 护栏 — 每请求必遵守】',

@@ -45,7 +45,10 @@ import {
   parsePlannerPaths,
 } from './scripts/project-context.mjs';
 import { classifyDiagramIntent, shouldApplyChinaUnivPostProcess } from './scripts/agent-intent.mjs';
+import { buildArchAgentSystemPrompt } from './scripts/arch-agent-prompt.mjs';
 import { buildKnowledgeInjection, resolveJarLabelFromDirs } from './scripts/kb-inject.mjs';
+import { parseEditorDocument } from './scripts/diagram-grammar.mjs';
+import { renderStudioArchSvg } from './scripts/studio-arch-graph.mjs';
 import { buildLockedEditorPlaceholder } from './scripts/agent-session-lock.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -140,6 +143,19 @@ function findKnowledgeBasePath() {
     join(__dirname, 'vendor', 'kb', 'PlantUML-Agent-Knowledge-Base.md'),
     join(__dirname, '..', 'PlantUML-Agent-Knowledge-Base.md'),
     join(__dirname, 'PlantUML-Agent-Knowledge-Base.md'),
+  ];
+  for (const p of candidates) {
+    if (p && existsSync(p)) return p;
+  }
+  return null;
+}
+
+function findArchKnowledgeBasePath() {
+  const candidates = [
+    join(process.resourcesPath || '', 'kb', 'Studio-Arch-Agent-Knowledge-Base.md'),
+    join(__dirname, 'vendor', 'kb', 'Studio-Arch-Agent-Knowledge-Base.md'),
+    join(__dirname, '..', 'Studio-Arch-Agent-Knowledge-Base.md'),
+    join(__dirname, 'Studio-Arch-Agent-Knowledge-Base.md'),
   ];
   for (const p of candidates) {
     if (p && existsSync(p)) return p;
@@ -907,6 +923,79 @@ async function runAgentPipelineWithProject(userText, projectRoot, ignoreGlobsTex
   return { ok: false, source, error: lastErr || '已达最大重试次数', logs };
 }
 
+function extractStudioArchFromModelText(raw) {
+  const t = String(raw || '');
+  const m = t.match(/@studio-arch[\s\S]*?@endstudio-arch/i);
+  return m ? m[0].trim() : '';
+}
+
+async function runArchitectureArchDraftAgent(userText, projectRoot, ignoreGlobsText) {
+  const root = String(projectRoot || '').trim();
+  if (!root) return { ok: false, error: '未选择项目目录', logs: [] };
+
+  const cfg = loadAgentConfig();
+  const rawGlobs =
+    ignoreGlobsText !== undefined && ignoreGlobsText !== null ? String(ignoreGlobsText) : cfg.projectIgnoreGlobs || '';
+  const userPatterns = parseIgnoreGlobLines(rawGlobs);
+
+  let manifest;
+  try {
+    manifest = collectProjectManifest(root, { userIgnoreGlobs: userPatterns });
+  } catch (e) {
+    return { ok: false, error: String(e.message || e), logs: [] };
+  }
+
+  const { text: manifestJsonl, truncated: manifestTruncated, lineCount: manifestLineCount, totalFiles } =
+    formatManifestJsonl(manifest.files, 1800);
+
+  const archKb = findArchKnowledgeBasePath();
+  const inj = buildKnowledgeInjection({
+    kbPath: archKb || '',
+    intent: 'arch_static',
+    userText: String(userText || ''),
+    maxChars: 16_000,
+    jarLabel: '',
+  });
+  const kbPayload = {
+    l0: inj.l0,
+    kbExcerpt: inj.kbExcerpt,
+    selectedTitles: inj.selectedTitles,
+    intent: 'arch_static',
+  };
+  const system = buildArchAgentSystemPrompt(kbPayload, cfg);
+  const userBlock = [
+    '【项目根】',
+    root,
+    '',
+    '【文件清单 JSONL（path 为唯一可信路径）】',
+    manifestJsonl,
+    manifestTruncated ? `\n… 另有约 ${Math.max(0, totalFiles - manifestLineCount)} 条未列出` : '',
+    '',
+    '【用户需求】',
+    String(userText || '').trim(),
+    '',
+    '请只输出一段：以 @studio-arch 开头、@endstudio-arch 结尾的 YAML 块，勿输出其它解释。',
+  ].join('\n');
+
+  const logs = [
+    `模式：静态架构草稿（arch_static）`,
+    `索引约 ${manifest.stats.fileCount} 个文本文件条目。`,
+    `[metrics] ${JSON.stringify({ mode: 'arch_draft', kbChars: inj.kbExcerpt.length, kbFallback: inj.fallback })}`,
+  ];
+
+  const raw = await deepseekChat(cfg, [
+    { role: 'system', content: system },
+    { role: 'user', content: userBlock },
+  ]);
+  const source = extractStudioArchFromModelText(raw);
+  if (!source) {
+    logs.push(`模型原始前 500 字：\n${raw.slice(0, 500)}`);
+    return { ok: false, error: '模型未返回 @studio-arch … @endstudio-arch 块', logs };
+  }
+  logs.push(`已提取 @studio-arch 块，${source.length} 字符。`);
+  return { ok: true, source, logs };
+}
+
 /** 优先：捆绑 JRE（安装版）→ JAVA_HOME → PATH 上的 java */
 function resolveJavaExecutable() {
   if (process.platform === 'win32') {
@@ -977,7 +1066,7 @@ async function startPicoWeb() {
   const javaExe = resolveJavaExecutable();
 
   return new Promise((resolve, reject) => {
-    javaChild = spawn(javaExe, ['-jar', jar, '--http-server:0'], {
+    javaChild = spawn(javaExe, ['-Djava.awt.headless=true', '-jar', jar, '--http-server:0'], {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });
@@ -1390,6 +1479,34 @@ function registerIpcHandlers() {
       if (r.ok && isProEdition()) {
         clearAgentSessionLock();
       }
+      return { ...r, locked: false, displaySource: r.source };
+    } catch (e) {
+      const msg = String(e.message || e);
+      return { ok: false, error: msg, logs: [msg] };
+    }
+  });
+
+  ipcMain.handle('studio:arch-render', async (_e, { projectRoot, ignoreGlobsText, archBlock }) => {
+    try {
+      const out = renderStudioArchSvg({
+        projectRoot: String(projectRoot || '').trim(),
+        ignoreGlobsText: String(ignoreGlobsText || ''),
+        archBlock: String(archBlock || ''),
+      });
+      return { ok: true, svgText: out.svg, meta: out.meta };
+    } catch (e) {
+      return { ok: false, error: String(e.message || e) };
+    }
+  });
+
+  ipcMain.handle('studio:agent-arch-draft', async (_e, { userText, projectRoot, ignoreGlobsText }) => {
+    try {
+      const text = String(userText || '').trim();
+      if (!text) return { ok: false, error: '请填写自然语言需求', logs: [] };
+      if (!String(projectRoot || '').trim()) {
+        return { ok: false, error: '未选择项目目录', logs: [] };
+      }
+      const r = await runArchitectureArchDraftAgent(text, projectRoot, ignoreGlobsText);
       return { ...r, locked: false, displaySource: r.source };
     } catch (e) {
       const msg = String(e.message || e);

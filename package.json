@@ -34,6 +34,9 @@
       "scripts/project-context.mjs",
       "scripts/agent-intent.mjs",
       "scripts/kb-inject.mjs",
+      "scripts/diagram-grammar.mjs",
+      "scripts/studio-arch-graph.mjs",
+      "scripts/arch-agent-prompt.mjs",
       "assets/app-logo-512.png"
     ],
     "extraResources": [
@@ -55,7 +58,7 @@
         "from": "vendor/kb",
         "to": "kb",
         "filter": [
-          "PlantUML-Agent-Knowledge-Base.md"
+          "*.md"
         ]
       }
     ],
