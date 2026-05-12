@@ -91,6 +91,9 @@ let lastSessionExecutionLog = '';
 /** 暂存区文件夹数据 */
 let stashFolders = [];
 
+/** 单次支付确认弹窗 Promise 收尾（由 wirePayUnlockConfirmDialog 注册） */
+let payUnlockConfirmResolver = null;
+
 /** SVG 编辑器实例 */
 let svgEditor = null;
 
@@ -167,7 +170,47 @@ async function runLocalMockPaySuccess() {
   await applyUnlockedSource(r, '本地模拟：已解除锁定，可正常导出与暂存');
 }
 
+function wirePayUnlockConfirmDialog() {
+  const dlg = $('pay-unlock-confirm-dialog');
+  if (!dlg || dlg.dataset.wired === '1') return;
+  dlg.dataset.wired = '1';
+  let userChosePay = false;
+
+  $('pay-unlock-confirm-go')?.addEventListener('click', () => {
+    userChosePay = true;
+    dlg.close();
+  });
+  $('pay-unlock-confirm-cancel')?.addEventListener('click', () => {
+    userChosePay = false;
+    dlg.close();
+  });
+  $('pay-unlock-confirm-close')?.addEventListener('click', () => {
+    userChosePay = false;
+    dlg.close();
+  });
+
+  dlg.addEventListener('close', () => {
+    const fn = payUnlockConfirmResolver;
+    payUnlockConfirmResolver = null;
+    const agreed = userChosePay;
+    userChosePay = false;
+    fn?.(agreed);
+  });
+}
+
+function openPayUnlockConfirmDialog() {
+  const dlg = $('pay-unlock-confirm-dialog');
+  if (!dlg || typeof dlg.showModal !== 'function') return Promise.resolve(false);
+  return new Promise((resolve) => {
+    payUnlockConfirmResolver = resolve;
+    dlg.showModal();
+  });
+}
+
 async function beginPayUnlockFlow() {
+  const go = await openPayUnlockConfirmDialog();
+  if (!go) return;
+
   if (!window.studio?.payOrderCreate) return;
   const cr = await window.studio.payOrderCreate();
   if (!cr?.ok) {
@@ -1257,18 +1300,20 @@ async function loadAgentForm() {
 async function saveAgentForm() {
   if (!window.studio?.setAgentConfig) return;
   try {
+    const chinaFromUi = Boolean($('china-univ-mode')?.checked);
     const r = await window.studio.setAgentConfig({
       apiKey: $('cfg-api-key').value,
       baseUrl: $('cfg-base-url').value,
       model: $('cfg-model').value,
       maxRetries: Number($('cfg-max-retries').value),
       projectIgnoreGlobs: projectIgnoreGlobsValue(),
-      chinaUnivMode: isChinaUnivMode,
+      chinaUnivMode: chinaFromUi,
     });
     if (r && r.ok === false) {
       setStatus(r.error || '未授权：请先在菜单「帮助 → 授权激活」中完成激活后再保存。', false);
       return;
     }
+    isChinaUnivMode = chinaFromUi;
     closeAgentSettingsDialog();
     setStatus('已保存 API 与编排设置', true);
   } catch (e) {
@@ -1277,7 +1322,24 @@ async function saveAgentForm() {
 }
 
 function onChinaUnivModeToggle() {
-  const next = $('china-univ-mode').checked;
+  const cb = $('china-univ-mode');
+  if (!cb) return;
+  const next = cb.checked;
+
+  if (next) {
+    const ok = window.confirm(
+      '【国内高校模式说明】\n\n' +
+        '该模式主要面向 ER 图（陈氏表示法）与流程图 / 活动图做了专门优化。\n' +
+        '开启后可能会自动改写 @startuml 等相关源码，容易导致时序图、组件图、类图等其他类型渲染失败或异常。\n\n' +
+        '若出现渲染失败，请先关闭本模式后再试。\n\n' +
+        '确定要开启吗？'
+    );
+    if (!ok) {
+      cb.checked = false;
+      return;
+    }
+  }
+
   if (window.studio?.setAgentConfig) {
     window.studio.setAgentConfig({ chinaUnivMode: next }).then((r) => {
       if (r && r.ok === false) {
@@ -1576,6 +1638,7 @@ async function syncAgentLockFromMain() {
 }
 
 function init() {
+  wirePayUnlockConfirmDialog();
   $('china-univ-mode')?.addEventListener('change', () => onChinaUnivModeToggle());
   
   $('source').value = DEFAULT_SOURCE;
@@ -1620,7 +1683,7 @@ function init() {
 
   $('btn-stash-add').addEventListener('click', () => openStashAddDialog());
 
-  $('btn-edit-mode').addEventListener('click', () => toggleEditMode());
+  $('btn-edit-mode')?.addEventListener('click', () => toggleEditMode());
 
   $('btn-stash-refresh').addEventListener('click', () => refreshStashList());
   $('btn-stash-new-folder').addEventListener('click', () => createStashFolder());
@@ -1682,12 +1745,32 @@ function init() {
 
   getBase()
     .then((b) => setStatus(`已连接 ${b}`, true))
-    .catch((e) => setStatus(String(e.message || e), false));
+    .catch((e) => setStatus(String(e.message || e), false))
+    .finally(() => void refreshEditionUi());
 }
 
 /* ============================================================
  * 授权激活对话框逻辑
  * ============================================================ */
+
+async function refreshEditionUi() {
+  const badge = $('edition-badge');
+  if (!badge || !window.studio?.licenseGetStatus) return;
+  try {
+    const s = await window.studio.licenseGetStatus();
+    const pro = s.edition === 'pro';
+    badge.textContent = pro ? '高级版' : '免费版';
+    badge.title = pro
+      ? '高级版：已激活，全部功能可长期使用'
+      : '免费版：智能生成内容可能需按次解锁；可通过「帮助 → 授权激活」购买高级版';
+    badge.classList.toggle('edition-badge--pro', pro);
+    badge.classList.toggle('edition-badge--free', !pro);
+    document.body.classList.toggle('studio-edition-pro', pro);
+    document.body.classList.toggle('studio-edition-free', !pro);
+  } catch {
+    /* ignore */
+  }
+}
 
 async function refreshLicenseStatus() {
   if (!window.studio?.licenseGetStatus) return;
@@ -1702,7 +1785,7 @@ async function refreshLicenseStatus() {
       icon.textContent = '✅';
       const mode = status.licenseMode === 'permanent' ? '永久授权' : '限时授权';
       const tier = status.payload?.tier || 'full';
-      text.textContent = `已激活（${mode}，等级: ${tier}）`;
+      text.textContent = `已激活 · 高级版（${mode}，等级: ${tier}）`;
       if (status.payload?.valid_until) {
         text.textContent += `，有效期至 ${status.payload.valid_until}`;
       }
@@ -1712,7 +1795,7 @@ async function refreshLicenseStatus() {
       $('license-activate-result').classList.add('hidden');
     } else {
       icon.textContent = '🔒';
-      const edition = status.edition === 'pro' ? '专业版' : '免费版';
+      const edition = status.edition === 'pro' ? '高级版（已激活）' : '免费版';
       text.textContent = `${status.error || '未激活'}（当前：${edition}）`;
       deviceArea.classList.remove('hidden');
       activateArea.classList.remove('hidden');
@@ -1761,6 +1844,7 @@ async function handleLicenseActivate() {
       resultEl.style.color = 'var(--ok)';
       setStatus('授权激活成功', true);
       await refreshLicenseStatus();
+      await refreshEditionUi();
       await syncAgentLockFromMain();
     } else {
       resultEl.textContent = `❌ 激活失败: ${r.error}`;
@@ -1783,6 +1867,7 @@ async function handleLicenseDeactivate() {
     if (r.ok) {
       setStatus('已卸载激活', true);
       await refreshLicenseStatus();
+      await refreshEditionUi();
       await syncAgentLockFromMain();
     } else {
       setStatus(`卸载失败: ${r.error}`, false);
@@ -1819,6 +1904,7 @@ function wireLicenseDialog() {
 
   window.openLicenseDialog = async () => {
     await refreshLicenseStatus();
+    await refreshEditionUi();
     if (typeof dlg.showModal === 'function') dlg.showModal();
   };
 

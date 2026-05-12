@@ -44,6 +44,67 @@ body {
   gap: 0.2rem;
 }
 
+.title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+
+.edition-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  user-select: none;
+  white-space: nowrap;
+}
+
+.edition-badge--free {
+  background: linear-gradient(180deg, #fff8e8 0%, #ffe8c4 100%);
+  color: #7a4e00;
+  border-color: #e0b060;
+}
+
+.edition-badge--pro {
+  background: linear-gradient(180deg, #e9f3ff 0%, #cfe4ff 100%);
+  color: #063666;
+  border-color: #7eb0e8;
+}
+
+body.studio-edition-free .topbar {
+  border-bottom: 2px solid rgba(224, 176, 96, 0.55);
+}
+
+body.studio-edition-pro .topbar {
+  border-bottom: 2px solid rgba(100, 160, 220, 0.55);
+}
+
+.china-univ-label {
+  cursor: help;
+}
+
+.pay-unlock-confirm-body p {
+  margin: 0 0 0.75rem;
+  line-height: 1.55;
+  font-size: 0.9rem;
+}
+
+.pay-unlock-confirm-upgrade {
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  background: var(--editor-bg);
+  border: 1px solid var(--border);
+}
+
+.pay-unlock-confirm-note {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-bottom: 0 !important;
+}
+
 .topbar h1 {
   margin: 0;
   font-size: 1.1rem;
