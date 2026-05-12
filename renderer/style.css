@@ -435,6 +435,13 @@ body.studio-agent-source-locked #source {
   display: block;
 }
 
+.mx-graph-host {
+  flex: 1;
+  width: 100%;
+  min-height: 220px;
+  position: relative;
+}
+
 .hidden {
   display: none !important;
 }

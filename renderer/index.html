@@ -93,6 +93,8 @@
           <div id="preview-placeholder" class="placeholder">点击「渲染预览」生成图像</div>
           <div id="preview-svg" class="preview-svg hidden"></div>
           <img id="preview-img" class="preview-img hidden" alt="预览" />
+          <!-- 画板仅挂载于此容器，避免清空 preview-wrap 时删掉占位符与预览节点 -->
+          <div id="mx-graph-host" class="mx-graph-host hidden" aria-hidden="true"></div>
         </div>
         <pre id="errors" class="errors hidden"></pre>
       </section>

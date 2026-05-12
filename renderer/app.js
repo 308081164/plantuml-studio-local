@@ -218,6 +218,7 @@ function recordSessionExecutionLog(body) {
 
 function setStatus(text, ok) {
   const el = $('status');
+  if (!el) return;
   el.textContent = text;
   el.classList.remove('status--ok', 'status--error');
   if (ok === true) el.classList.add('status--ok');
@@ -230,6 +231,7 @@ function setStatus(text, ok) {
  */
 function showErrors(lines, archiveKind = 'preview-plantuml') {
   const box = $('errors');
+  if (!box) return;
   if (!lines.length) {
     box.classList.add('hidden');
     box.textContent = '';
@@ -244,11 +246,20 @@ function showErrors(lines, archiveKind = 'preview-plantuml') {
 }
 
 function clearPreview() {
-  $('preview-placeholder').classList.remove('hidden');
-  $('preview-img').classList.add('hidden');
-  $('preview-svg').classList.add('hidden');
-  $('preview-svg').innerHTML = '';
-  $('preview-img').removeAttribute('src');
+  const ph = $('preview-placeholder');
+  const img = $('preview-img');
+  const svg = $('preview-svg');
+  if (ph) {
+    ph.classList.remove('hidden');
+  }
+  if (img) {
+    img.classList.add('hidden');
+    img.removeAttribute('src');
+  }
+  if (svg) {
+    svg.classList.add('hidden');
+    svg.innerHTML = '';
+  }
 }
 
 async function getBase() {
@@ -316,7 +327,12 @@ async function render() {
     : $('source').value;
   const doc = parseEditorDocument(grammarText);
 
-  const fmt = $('format').value;
+  const fmtEl = $('format');
+  if (!fmtEl) {
+    setStatus('界面未就绪（缺少格式选择控件）', false);
+    return;
+  }
+  const fmt = fmtEl.value;
   showErrors([]);
   setStatus('渲染中…', null);
   setPreviewLockOverlay(Boolean(bundle.locked));
@@ -427,7 +443,12 @@ async function render() {
     showErrors(errLines);
     setStatus(errLines.length ? '已渲染（含响应头提示）' : '已渲染', !errLines.length);
   } catch (e) {
-    const msg = String(e.message || e);
+    const raw = String(e?.message || e);
+    let msg = raw;
+    if (/fetch failed|failed to fetch|networkerror/i.test(raw)) {
+      msg = `${raw}\n\n提示：本机预览依赖 Java PlantUML PicoWeb（127.0.0.1）。若持续失败，请确认本机已安装 Java、安装包内含 plantuml-*.jar，且安全软件未拦截本地回环。`;
+    }
+    clearPreview();
     showErrors([msg], 'render-exception');
     setStatus('异常', false);
   }
@@ -478,7 +499,12 @@ async function exportFile() {
   }
 
   let source = bundle.source;
-  const fmt = $('format').value;
+  const fmtEl = $('format');
+  if (!fmtEl) {
+    setStatus('界面未就绪（缺少格式选择控件）', false);
+    return;
+  }
+  const fmt = fmtEl.value;
   setStatus('导出中…', null);
 
   source = applyChinaUnivModeIfNeeded(source);
@@ -540,6 +566,11 @@ async function copyPreviewPngToClipboard() {
   const imgEl = $('preview-img');
   const svgWrap = $('preview-svg');
 
+  if (!ph || !imgEl || !svgWrap) {
+    setStatus('预览区控件缺失', false);
+    return;
+  }
+
   if (!ph.classList.contains('hidden')) {
     setStatus('请先渲染预览', false);
     return;
@@ -588,6 +619,7 @@ async function copyPreviewPngToClipboard() {
 
 function wirePreviewContextMenu() {
   const wrap = $('preview-wrap');
+  if (!wrap) return;
   wrap.addEventListener('contextmenu', (ev) => {
     if (!previewHasContent()) return;
     ev.preventDefault();
@@ -901,8 +933,23 @@ function enterEditMode() {
   btn.textContent = '退出画板';
   btn.classList.add('active');
 
-  const previewWrap = $('preview-wrap');
-  const editor = new MxGraphEditor(previewWrap);
+  const mxHost = $('mx-graph-host');
+  if (!mxHost) {
+    isInEditMode = false;
+    btn.textContent = '进入画板';
+    btn.classList.remove('active');
+    setStatus('画板容器缺失，请更新应用', false);
+    return;
+  }
+
+  $('preview-placeholder')?.classList.add('hidden');
+  $('preview-img')?.classList.add('hidden');
+  $('preview-svg')?.classList.add('hidden');
+
+  mxHost.classList.remove('hidden');
+  mxHost.setAttribute('aria-hidden', 'false');
+
+  const editor = new MxGraphEditor(mxHost);
 
   editor.onExportCallback = (data) => {
     if (data.kind === 'svg') {
@@ -936,6 +983,29 @@ function exitEditMode() {
   if (svgEditor) {
     svgEditor.destroy();
     svgEditor = null;
+  }
+
+  const mxHost = $('mx-graph-host');
+  if (mxHost) {
+    mxHost.classList.add('hidden');
+    mxHost.setAttribute('aria-hidden', 'true');
+  }
+
+  const svgWrap = $('preview-svg');
+  const ph = $('preview-placeholder');
+  const imgEl = $('preview-img');
+  if (svgWrap?.querySelector('svg')) {
+    svgWrap.classList.remove('hidden');
+    ph?.classList.add('hidden');
+    imgEl?.classList.add('hidden');
+  } else if (imgEl?.src && imgEl.src.startsWith('blob:') && !imgEl.classList.contains('hidden')) {
+    imgEl.classList.remove('hidden');
+    ph?.classList.add('hidden');
+    svgWrap?.classList.add('hidden');
+  } else {
+    ph?.classList.remove('hidden');
+    svgWrap?.classList.add('hidden');
+    imgEl?.classList.add('hidden');
   }
 
   setStatus('已退出画板编辑模式', true);
@@ -1163,7 +1233,7 @@ function isAgentKeyConfigured() {
 async function loadAgentForm() {
   if (!window.studio?.getAgentConfig) return;
   try {
-    const c = await window.studio.getAgentConfig();
+    const c = (await window.studio.getAgentConfig()) || {};
     $('cfg-api-key').value = c.apiKey || '';
     $('cfg-base-url').value = c.baseUrl || '';
     $('cfg-model').value = c.model || '';

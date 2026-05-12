@@ -94,6 +94,9 @@ function loadAgentConfig() {
     if (!existsSync(p)) return { ...DEFAULT_AGENT };
     const raw = readFileSync(p, 'utf8');
     const j = JSON.parse(raw);
+    if (typeof j !== 'object' || j === null || Array.isArray(j)) {
+      return { ...DEFAULT_AGENT };
+    }
     return {
       ...DEFAULT_AGENT,
       ...j,
@@ -174,6 +177,7 @@ function resolvePlantumlJarLabelForPrompt() {
  * @param {*} cfg
  */
 function buildAgentSystemPrompt(kbPayload, cfg) {
+  const safeCfg = { ...DEFAULT_AGENT, ...(cfg && typeof cfg === 'object' ? cfg : {}) };
   const l0 = String(kbPayload?.l0 || '').trim();
   const kbExcerpt = String(kbPayload?.kbExcerpt || '').trim();
   const titles = Array.isArray(kbPayload?.selectedTitles) ? kbPayload.selectedTitles.filter(Boolean) : [];
@@ -182,7 +186,7 @@ function buildAgentSystemPrompt(kbPayload, cfg) {
     kbExcerpt.length > 0
       ? `\n【知识库摘录（非全文）】章节参考：${titles.length ? titles.join('、') : '自动路由'}；意图：${intentTag || 'n/a'}\n${kbExcerpt}`
       : '';
-  const chinaModeExtra = cfg.chinaUnivMode ? `
+  const chinaModeExtra = safeCfg.chinaUnivMode ? `
 ===== 【国内高校模式：强制输出规则】 =====
 【专规优先声明】本节覆盖与本节冲突的通用表述（例如通用规则中的「可用 note 写假设」：@startchen 与国内高校活动图专规不适用处，以本节为准）。
 1️⃣ 第一行必须是：@startuml activity
@@ -412,7 +416,8 @@ endif
 }
 
 function buildAgentSystemPromptForProject(kbPayload, cfg) {
-  return `${buildAgentSystemPrompt(kbPayload, cfg)}\n\n【项目模式】用户会提供本地工程目录的索引与「规划阶段」选出的若干源文件全文（受控长度）。请结合这些内容制图；若仍有信息缺口且非 @startchen，在图中用 note 标明假设与未读到的模块。`;
+  const safeCfg = { ...DEFAULT_AGENT, ...(cfg && typeof cfg === 'object' ? cfg : {}) };
+  return `${buildAgentSystemPrompt(kbPayload, safeCfg)}\n\n【项目模式】用户会提供本地工程目录的索引与「规划阶段」选出的若干源文件全文（受控长度）。请结合这些内容制图；若仍有信息缺口且非 @startchen，在图中用 note 标明假设与未读到的模块。`;
 }
 
 /** 附在 PlantUML 校验失败后的修正轮 user 消息中，针对高频语法坑（如 title 行内字面 \\n） */
@@ -466,7 +471,8 @@ function extractPlantumlFromModelText(text) {
  * 注意：@startchen 语法不需要转换，保持原样
  */
 function applyChinaUnivModeIfNeeded(source, cfg, ctx = {}) {
-  if (!cfg.chinaUnivMode) return source;
+  const safeCfg = { ...DEFAULT_AGENT, ...(cfg && typeof cfg === 'object' ? cfg : {}) };
+  if (!safeCfg.chinaUnivMode) return source;
 
   const intent = ctx.intent || 'other';
   const userText = String(ctx.userText || '');
@@ -627,6 +633,20 @@ async function deepseekChat(config, messages, options = {}) {
       }),
       signal: controller.signal,
     });
+  } catch (e) {
+    clearTimeout(t);
+    const name = e && typeof e === 'object' ? e.name : '';
+    const errMsg = String(e?.message || e);
+    const cause = e?.cause != null ? String(e.cause?.message || e.cause) : '';
+    if (name === 'AbortError') {
+      throw new Error('DeepSeek 请求超时（120 秒）');
+    }
+    if (/fetch failed|failed to fetch|network/i.test(errMsg) || cause) {
+      throw new Error(
+        `${errMsg}${cause ? `（原因：${cause}）` : ''}\n\n请检查 Base URL 是否可达、系统代理/防火墙是否拦截，以及 API Key 是否有效。`
+      );
+    }
+    throw e instanceof Error ? e : new Error(errMsg);
   } finally {
     clearTimeout(t);
   }
