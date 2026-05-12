@@ -13,7 +13,14 @@
   <body>
     <header class="topbar">
       <div class="title-area">
-        <h1>PlantUML 本地工作室</h1>
+        <div class="title-row">
+          <h1>PlantUML 本地工作室</h1>
+          <span
+            id="edition-badge"
+            class="edition-badge edition-badge--free"
+            title="当前为免费版；激活高级版后全功能长期可用"
+            >免费版</span>
+        </div>
         <div class="title-sub">
           <span class="project-label">项目目录驱动制图</span>
           <span class="project-badge">2.0 Beta</span>
@@ -33,7 +40,7 @@
             <option value="-tpng">PNG</option>
           </select>
         </label>
-        <label class="fmt">
+        <label class="fmt china-univ-label" title="默认关闭。仅建议用于 ER 图与流程图；开启可能影响时序图等其它图类。">
           <input type="checkbox" id="china-univ-mode" />
           国内高校模式
         </label>
@@ -78,7 +85,7 @@
             <button type="button" id="btn-pay-mock-local" class="ghost hidden" title="未接支付宝网关时：本地直接模拟支付成功并解锁">本地模拟支付成功</button>
             <button type="button" id="btn-pay-unlock" class="ghost hidden" title="支付 0.8 元解锁本条智能生成内容">支付解锁</button>
             <button type="button" id="btn-pay-done" class="ghost hidden" title="在浏览器完成支付后点此校验">我已完成支付</button>
-            <button type="button" id="btn-edit-mode" class="edit-mode-btn" title="进入画板进行图形编辑">
+            <button type="button" id="btn-edit-mode" class="edit-mode-btn hidden" hidden aria-hidden="true" title="画板功能暂缓开放">
               进入画板
             </button>
             <button type="button" id="btn-stash-add" class="stash-add-btn" title="将当前预览保存到暂存区">
@@ -93,6 +100,8 @@
           <div id="preview-placeholder" class="placeholder">点击「渲染预览」生成图像</div>
           <div id="preview-svg" class="preview-svg hidden"></div>
           <img id="preview-img" class="preview-img hidden" alt="预览" />
+          <!-- 画板仅挂载于此容器，避免清空 preview-wrap 时删掉占位符与预览节点 -->
+          <div id="mx-graph-host" class="mx-graph-host hidden" aria-hidden="true"></div>
         </div>
         <pre id="errors" class="errors hidden"></pre>
       </section>
@@ -238,6 +247,26 @@
         <button type="button" id="project-imported-ok" class="primary">确定</button>
       </div>
     </dialog>
+    <dialog id="pay-unlock-confirm-dialog" class="app-dialog">
+      <div class="app-dialog-head">
+        <h3 class="app-dialog-title">确认单次解锁付费</h3>
+        <button type="button" id="pay-unlock-confirm-close" class="app-dialog-close">关闭</button>
+      </div>
+      <div class="app-dialog-body pay-unlock-confirm-body">
+        <p>
+          即将为本条<strong>智能生成</strong>内容支付 <strong>¥0.80</strong>（实际金额以支付宝页面为准）。支付成功后将仅解除<strong>当前这一条</strong>的锁定、导出与暂存限制。
+        </p>
+        <p class="pay-unlock-confirm-upgrade">
+          <strong>更推荐：</strong>购买并激活<strong>高级版（激活码）</strong>后，<strong>全部功能可长期使用</strong>，无需每次单独付费解锁。
+        </p>
+        <p class="pay-unlock-confirm-note">若支付服务暂不可用，您仍可使用「本地模拟支付成功」进行联调测试。</p>
+      </div>
+      <div class="app-dialog-actions">
+        <button type="button" id="pay-unlock-confirm-cancel" class="ghost">取消</button>
+        <button type="button" id="pay-unlock-confirm-go" class="primary">确认并打开支付</button>
+      </div>
+    </dialog>
+
     <dialog id="license-dialog" class="app-dialog app-dialog--wide">
       <div class="app-dialog-head">
         <h3 class="app-dialog-title">授权激活</h3>

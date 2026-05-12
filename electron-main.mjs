@@ -14,6 +14,16 @@ import { randomUUID, createHash } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import dns from 'node:dns';
+
+/** 部分网络环境下 IPv6 优先会导致 TLS/连接间歇失败，优先尝试 IPv4 */
+try {
+  if (typeof dns.setDefaultResultOrder === 'function') {
+    dns.setDefaultResultOrder('ipv4first');
+  }
+} catch {
+  /* ignore */
+}
 import { buildZhMenu } from './scripts/app-menu.mjs';
 import {
   generateHwId,
@@ -94,6 +104,9 @@ function loadAgentConfig() {
     if (!existsSync(p)) return { ...DEFAULT_AGENT };
     const raw = readFileSync(p, 'utf8');
     const j = JSON.parse(raw);
+    if (typeof j !== 'object' || j === null || Array.isArray(j)) {
+      return { ...DEFAULT_AGENT };
+    }
     return {
       ...DEFAULT_AGENT,
       ...j,
@@ -174,6 +187,7 @@ function resolvePlantumlJarLabelForPrompt() {
  * @param {*} cfg
  */
 function buildAgentSystemPrompt(kbPayload, cfg) {
+  const safeCfg = { ...DEFAULT_AGENT, ...(cfg && typeof cfg === 'object' ? cfg : {}) };
   const l0 = String(kbPayload?.l0 || '').trim();
   const kbExcerpt = String(kbPayload?.kbExcerpt || '').trim();
   const titles = Array.isArray(kbPayload?.selectedTitles) ? kbPayload.selectedTitles.filter(Boolean) : [];
@@ -182,7 +196,7 @@ function buildAgentSystemPrompt(kbPayload, cfg) {
     kbExcerpt.length > 0
       ? `\n【知识库摘录（非全文）】章节参考：${titles.length ? titles.join('、') : '自动路由'}；意图：${intentTag || 'n/a'}\n${kbExcerpt}`
       : '';
-  const chinaModeExtra = cfg.chinaUnivMode ? `
+  const chinaModeExtra = safeCfg.chinaUnivMode ? `
 ===== 【国内高校模式：强制输出规则】 =====
 【专规优先声明】本节覆盖与本节冲突的通用表述（例如通用规则中的「可用 note 写假设」：@startchen 与国内高校活动图专规不适用处，以本节为准）。
 1️⃣ 第一行必须是：@startuml activity
@@ -412,7 +426,8 @@ endif
 }
 
 function buildAgentSystemPromptForProject(kbPayload, cfg) {
-  return `${buildAgentSystemPrompt(kbPayload, cfg)}\n\n【项目模式】用户会提供本地工程目录的索引与「规划阶段」选出的若干源文件全文（受控长度）。请结合这些内容制图；若仍有信息缺口且非 @startchen，在图中用 note 标明假设与未读到的模块。`;
+  const safeCfg = { ...DEFAULT_AGENT, ...(cfg && typeof cfg === 'object' ? cfg : {}) };
+  return `${buildAgentSystemPrompt(kbPayload, safeCfg)}\n\n【项目模式】用户会提供本地工程目录的索引与「规划阶段」选出的若干源文件全文（受控长度）。请结合这些内容制图；若仍有信息缺口且非 @startchen，在图中用 note 标明假设与未读到的模块。`;
 }
 
 /** 附在 PlantUML 校验失败后的修正轮 user 消息中，针对高频语法坑（如 title 行内字面 \\n） */
@@ -466,7 +481,8 @@ function extractPlantumlFromModelText(text) {
  * 注意：@startchen 语法不需要转换，保持原样
  */
 function applyChinaUnivModeIfNeeded(source, cfg, ctx = {}) {
-  if (!cfg.chinaUnivMode) return source;
+  const safeCfg = { ...DEFAULT_AGENT, ...(cfg && typeof cfg === 'object' ? cfg : {}) };
+  if (!safeCfg.chinaUnivMode) return source;
 
   const intent = ctx.intent || 'other';
   const userText = String(ctx.userText || '');
@@ -599,8 +615,60 @@ ${near ? `--- 源码片段（错误行 ±N）---\n${near}\n` : ''}
 ${folded}`;
 }
 
+/** @param {unknown} e */
+function flattenFetchRelatedMessage(e) {
+  const parts = [];
+  const seen = new Set();
+  const push = (s) => {
+    const t = String(s || '').trim();
+    if (t && !seen.has(t)) {
+      seen.add(t);
+      parts.push(t);
+    }
+  };
+  if (e instanceof AggregateError && Array.isArray(e.errors)) {
+    push(e.message);
+    for (const sub of e.errors) {
+      if (sub && typeof sub === 'object' && 'message' in sub) push(sub.message);
+      else push(sub);
+    }
+  } else {
+    let cur = e;
+    for (let depth = 0; cur != null && depth < 8; depth++) {
+      if (typeof cur === 'object' && 'message' in cur) push(cur.message);
+      else if (typeof cur === 'string') push(cur);
+      if (cur instanceof AggregateError && Array.isArray(cur.errors)) {
+        for (const sub of cur.errors) {
+          if (sub && typeof sub === 'object' && 'message' in sub) push(sub.message);
+          else push(sub);
+        }
+        break;
+      }
+      cur = cur && typeof cur === 'object' && 'cause' in cur ? cur.cause : null;
+    }
+  }
+  return parts.join(' | ') || '未知错误';
+}
+
+/** @param {string} msg */
+function isTransientDeepseekFailure(msg) {
+  const m = String(msg || '').toLowerCase();
+  return (
+    /fetch failed|failed to fetch|networkerror|econnreset|etimedout|econnrefused|enotfound|eai_again|socket hang up|und_err|aborted|reset by peer|tls|ssl|certificate|eof/i.test(
+      m
+    ) || /timeout|timed out/i.test(m)
+  );
+}
+
+function sleepMs(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 async function deepseekChat(config, messages, options = {}) {
-  const base = config.baseUrl.replace(/\/$/, '');
+  const base = String(config.baseUrl || '')
+    .trim()
+    .replace(/\/$/, '');
+  if (!base) throw new Error('未配置 Base URL');
   const url = `${base}/v1/chat/completions`;
   const key = (config.apiKey || '').trim();
   if (!key) throw new Error('未配置 DeepSeek API Key');
@@ -610,35 +678,74 @@ async function deepseekChat(config, messages, options = {}) {
       ? Math.min(1.5, Math.max(0, options.temperature))
       : 0.2;
 
-  const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), 120000);
-  let res;
-  try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${key}`,
-      },
-      body: JSON.stringify({
-        model: config.model,
-        messages,
-        temperature,
-      }),
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(t);
+  const maxAttempts = Math.max(1, Math.min(6, Number(options.fetchMaxAttempts) || 4));
+  const body = JSON.stringify({
+    model: config.model,
+    messages,
+    temperature,
+  });
+
+  let lastFlat = '';
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 120000);
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${key}`,
+        },
+        body,
+        signal: controller.signal,
+      });
+      clearTimeout(t);
+
+      if (!res.ok) {
+        const t2 = await res.text();
+        const flatHttp = `HTTP ${res.status}: ${t2.slice(0, 800)}`;
+        lastFlat = flatHttp;
+        const retryable = [408, 425, 429, 500, 502, 503, 504].includes(res.status);
+        if (retryable && attempt < maxAttempts) {
+          const delay = Math.min(12_000, 400 * 2 ** (attempt - 1)) + Math.floor(Math.random() * 250);
+          await sleepMs(delay);
+          continue;
+        }
+        throw new Error(`DeepSeek 请求失败 ${flatHttp}`);
+      }
+
+      const j = await res.json();
+      const content = j.choices?.[0]?.message?.content;
+      if (!content) throw new Error('DeepSeek 响应无有效内容');
+      return String(content);
+    } catch (e) {
+      clearTimeout(t);
+      const name = e && typeof e === 'object' ? e.name : '';
+      const flat = flattenFetchRelatedMessage(e);
+      lastFlat = flat;
+
+      if (name === 'AbortError' || /\babort(ed)?\b/i.test(flat)) {
+        throw new Error('DeepSeek 请求超时（120 秒）');
+      }
+
+      const transient =
+        isTransientDeepseekFailure(flat) ||
+        (e && typeof e === 'object' && isTransientDeepseekFailure(String(e.cause?.message || '')));
+
+      if (transient && attempt < maxAttempts) {
+        const delay = Math.min(12_000, 400 * 2 ** (attempt - 1)) + Math.floor(Math.random() * 300);
+        await sleepMs(delay);
+        continue;
+      }
+
+      const hint =
+        '请检查：1) Base URL（例如 https://api.deepseek.com）是否可达 2) 系统代理 / VPN / 防火墙是否拦截 3) API Key 是否有效 4) 若在公司网络，可尝试切换网络或配置系统代理。';
+      throw new Error(`${flat}\n\n${hint}`);
+    }
   }
 
-  if (!res.ok) {
-    const t2 = await res.text();
-    throw new Error(`DeepSeek 请求失败 HTTP ${res.status}: ${t2.slice(0, 800)}`);
-  }
-  const j = await res.json();
-  const content = j.choices?.[0]?.message?.content;
-  if (!content) throw new Error('DeepSeek 响应无有效内容');
-  return String(content);
+  throw new Error(lastFlat || 'DeepSeek 请求失败');
 }
 
 async function runAgentPipeline(userText) {
