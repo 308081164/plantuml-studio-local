@@ -82,6 +82,17 @@ const $ = (id) => document.getElementById(id);
 /** 当前选择的项目根目录（与主进程配置 lastProjectRoot 同步） */
 let selectedProjectRoot = '';
 
+/** 顶栏项目路径为 span，必须使用 textContent 回显（误用 .value 会导致选择目录后不显示） */
+function syncProjectRootDisplay(absolutePath) {
+  const el = $('project-root-display');
+  if (!el) return;
+  const p =
+    absolutePath !== undefined && absolutePath !== null
+      ? String(absolutePath).trim()
+      : String(selectedProjectRoot || '').trim();
+  el.textContent = p || '未选择项目目录…';
+}
+
 /** 国内高校模式开关 */
 let isChinaUnivMode = false;
 
@@ -1284,8 +1295,7 @@ async function loadAgentForm() {
     const ig = $('cfg-project-ignore-globs');
     if (ig) ig.value = c.projectIgnoreGlobs || '';
     selectedProjectRoot = String(c.lastProjectRoot || '').trim();
-    const pr = $('project-root-display');
-    if (pr) pr.value = selectedProjectRoot;
+    syncProjectRootDisplay(selectedProjectRoot);
     isChinaUnivMode = Boolean(c.chinaUnivMode);
     const modeCb = $('china-univ-mode');
     if (modeCb) modeCb.checked = isChinaUnivMode;
@@ -1437,8 +1447,7 @@ async function pickProjectDirectory() {
   }
   if (!r.path) return;
   selectedProjectRoot = r.path;
-  const pr = $('project-root-display');
-  if (pr) pr.value = r.path;
+  syncProjectRootDisplay(r.path);
   if (window.studio.setAgentConfig) {
     const sr = await window.studio.setAgentConfig({ lastProjectRoot: r.path });
     if (sr && sr.ok === false) {

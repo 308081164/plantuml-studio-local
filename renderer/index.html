@@ -67,8 +67,22 @@
             </div>
             <textarea id="agent-request" rows="6" spellcheck="false" placeholder="例如：画一个用户登录的时序图，包含前端、网关、认证服务与数据库…"></textarea>
             <div class="agent-nl-actions">
-              <button type="button" id="btn-agent-run" class="primary">生成 PlantUML 并填入编辑器</button>
-              <button type="button" id="btn-agent-project" class="ghost" title="需已选项目目录">项目一键 PlantUML</button>
+              <button
+                type="button"
+                id="btn-agent-run"
+                class="primary"
+                title="仅根据下方「自然语言需求」调用 DeepSeek，不读取已选项目目录中的源码；适合纯描述制图。"
+              >
+                仅按需求生成 PlantUML
+              </button>
+              <button
+                type="button"
+                id="btn-agent-project"
+                class="ghost"
+                title="需先选择项目目录；会扫描仓库内文件并抽取源码上下文，再结合需求生成 PlantUML。"
+              >
+                结合项目生成 PlantUML
+              </button>
               <button type="button" id="btn-agent-arch-draft" class="ghost" title="独立知识库；输出 @studio-arch YAML，本地渲染黑白灰 SVG">
                 生成 @studio-arch 草稿
               </button>
