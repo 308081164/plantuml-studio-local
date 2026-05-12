@@ -13,6 +13,11 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const { encode: encodePlantUML } = require('plantuml-encoder');
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: join(__dirname, '.env') });
 const DATA_DIR = process.env.STUDIO_SERVER_DATA_DIR || join(__dirname, 'data');
@@ -314,6 +319,80 @@ app.get('/api/public/latest-release', (_req, res) => {
     res.status(500).json({ ok: false, error: String(e.message || e) });
   }
 });
+
+/** 在线 PlantUML 预览：编码后请求 PlantUML 官方公共服务（国内可达性通常优于 Kroki） */
+const MAX_PLANTUML_SOURCE_CHARS = 180_000;
+const PLANTUML_ONLINE_SVG_BASE = (
+  process.env.PLANTUML_ONLINE_SVG_BASE || 'https://www.plantuml.com/plantuml/svg'
+).replace(/\/$/, '');
+/** GET 路径过长时易被网关截断，超过则提示使用桌面端 */
+const MAX_ENCODED_PATH_CHARS = 7500;
+
+app.post('/api/convert/plantuml', async (req, res) => {
+  try {
+    const source = String(req.body?.source ?? '').replace(/^\uFEFF/, '');
+    const trimmed = source.trim();
+    if (!trimmed) {
+      return res.status(400).json({ ok: false, error: '请输入 PlantUML 源码' });
+    }
+    if (source.length > MAX_PLANTUML_SOURCE_CHARS) {
+      return res.status(413).json({
+        ok: false,
+        error: `源码长度超过上限（${MAX_PLANTUML_SOURCE_CHARS} 字符）`,
+      });
+    }
+    let encoded;
+    try {
+      encoded = encodePlantUML(source);
+    } catch (encErr) {
+      return res.status(400).json({ ok: false, error: `编码失败：${encErr.message || encErr}` });
+    }
+    if (encoded.length > MAX_ENCODED_PATH_CHARS) {
+      return res.status(413).json({
+        ok: false,
+        error:
+          '图表过大，编码后超出在线预览 URL 上限。请精简图源或使用桌面客户端进行本地渲染。',
+      });
+    }
+    const url = `${PLANTUML_ONLINE_SVG_BASE}/${encoded}`;
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 30_000);
+    let r;
+    try {
+      r = await fetch(url, {
+        method: 'GET',
+        signal: ac.signal,
+        headers: { Accept: 'image/svg+xml,text/plain,*/*' },
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    const text = await r.text();
+    if (!r.ok) {
+      return res.status(502).json({
+        ok: false,
+        error: `PlantUML 在线服务返回 HTTP ${r.status}`,
+        detail: text.slice(0, 4000),
+      });
+    }
+    if (!text.includes('<svg')) {
+      return res.status(502).json({
+        ok: false,
+        error: '渲染结果非有效 SVG（可能为语法错误提示页）',
+        detail: text.slice(0, 2000),
+      });
+    }
+    return res.json({ ok: true, svg: text });
+  } catch (e) {
+    const msg = e?.name === 'AbortError' ? '渲染超时，请缩小图表或稍后重试' : String(e?.message || e);
+    return res.status(502).json({ ok: false, error: msg });
+  }
+});
+
+const PUBLIC_WEB_DIR = join(__dirname, 'public');
+if (existsSync(PUBLIC_WEB_DIR)) {
+  app.use(express.static(PUBLIC_WEB_DIR, { maxAge: '2h', index: 'index.html' }));
+}
 
 loadOrders();
 ensureDataDir();
