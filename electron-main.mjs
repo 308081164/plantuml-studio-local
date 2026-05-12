@@ -14,6 +14,16 @@ import { randomUUID, createHash } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import dns from 'node:dns';
+
+/** 部分网络环境下 IPv6 优先会导致 TLS/连接间歇失败，优先尝试 IPv4 */
+try {
+  if (typeof dns.setDefaultResultOrder === 'function') {
+    dns.setDefaultResultOrder('ipv4first');
+  }
+} catch {
+  /* ignore */
+}
 import { buildZhMenu } from './scripts/app-menu.mjs';
 import {
   generateHwId,
@@ -605,8 +615,60 @@ ${near ? `--- 源码片段（错误行 ±N）---\n${near}\n` : ''}
 ${folded}`;
 }
 
+/** @param {unknown} e */
+function flattenFetchRelatedMessage(e) {
+  const parts = [];
+  const seen = new Set();
+  const push = (s) => {
+    const t = String(s || '').trim();
+    if (t && !seen.has(t)) {
+      seen.add(t);
+      parts.push(t);
+    }
+  };
+  if (e instanceof AggregateError && Array.isArray(e.errors)) {
+    push(e.message);
+    for (const sub of e.errors) {
+      if (sub && typeof sub === 'object' && 'message' in sub) push(sub.message);
+      else push(sub);
+    }
+  } else {
+    let cur = e;
+    for (let depth = 0; cur != null && depth < 8; depth++) {
+      if (typeof cur === 'object' && 'message' in cur) push(cur.message);
+      else if (typeof cur === 'string') push(cur);
+      if (cur instanceof AggregateError && Array.isArray(cur.errors)) {
+        for (const sub of cur.errors) {
+          if (sub && typeof sub === 'object' && 'message' in sub) push(sub.message);
+          else push(sub);
+        }
+        break;
+      }
+      cur = cur && typeof cur === 'object' && 'cause' in cur ? cur.cause : null;
+    }
+  }
+  return parts.join(' | ') || '未知错误';
+}
+
+/** @param {string} msg */
+function isTransientDeepseekFailure(msg) {
+  const m = String(msg || '').toLowerCase();
+  return (
+    /fetch failed|failed to fetch|networkerror|econnreset|etimedout|econnrefused|enotfound|eai_again|socket hang up|und_err|aborted|reset by peer|tls|ssl|certificate|eof/i.test(
+      m
+    ) || /timeout|timed out/i.test(m)
+  );
+}
+
+function sleepMs(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 async function deepseekChat(config, messages, options = {}) {
-  const base = config.baseUrl.replace(/\/$/, '');
+  const base = String(config.baseUrl || '')
+    .trim()
+    .replace(/\/$/, '');
+  if (!base) throw new Error('未配置 Base URL');
   const url = `${base}/v1/chat/completions`;
   const key = (config.apiKey || '').trim();
   if (!key) throw new Error('未配置 DeepSeek API Key');
@@ -616,49 +678,74 @@ async function deepseekChat(config, messages, options = {}) {
       ? Math.min(1.5, Math.max(0, options.temperature))
       : 0.2;
 
-  const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), 120000);
-  let res;
-  try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${key}`,
-      },
-      body: JSON.stringify({
-        model: config.model,
-        messages,
-        temperature,
-      }),
-      signal: controller.signal,
-    });
-  } catch (e) {
-    clearTimeout(t);
-    const name = e && typeof e === 'object' ? e.name : '';
-    const errMsg = String(e?.message || e);
-    const cause = e?.cause != null ? String(e.cause?.message || e.cause) : '';
-    if (name === 'AbortError') {
-      throw new Error('DeepSeek 请求超时（120 秒）');
+  const maxAttempts = Math.max(1, Math.min(6, Number(options.fetchMaxAttempts) || 4));
+  const body = JSON.stringify({
+    model: config.model,
+    messages,
+    temperature,
+  });
+
+  let lastFlat = '';
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 120000);
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${key}`,
+        },
+        body,
+        signal: controller.signal,
+      });
+      clearTimeout(t);
+
+      if (!res.ok) {
+        const t2 = await res.text();
+        const flatHttp = `HTTP ${res.status}: ${t2.slice(0, 800)}`;
+        lastFlat = flatHttp;
+        const retryable = [408, 425, 429, 500, 502, 503, 504].includes(res.status);
+        if (retryable && attempt < maxAttempts) {
+          const delay = Math.min(12_000, 400 * 2 ** (attempt - 1)) + Math.floor(Math.random() * 250);
+          await sleepMs(delay);
+          continue;
+        }
+        throw new Error(`DeepSeek 请求失败 ${flatHttp}`);
+      }
+
+      const j = await res.json();
+      const content = j.choices?.[0]?.message?.content;
+      if (!content) throw new Error('DeepSeek 响应无有效内容');
+      return String(content);
+    } catch (e) {
+      clearTimeout(t);
+      const name = e && typeof e === 'object' ? e.name : '';
+      const flat = flattenFetchRelatedMessage(e);
+      lastFlat = flat;
+
+      if (name === 'AbortError' || /\babort(ed)?\b/i.test(flat)) {
+        throw new Error('DeepSeek 请求超时（120 秒）');
+      }
+
+      const transient =
+        isTransientDeepseekFailure(flat) ||
+        (e && typeof e === 'object' && isTransientDeepseekFailure(String(e.cause?.message || '')));
+
+      if (transient && attempt < maxAttempts) {
+        const delay = Math.min(12_000, 400 * 2 ** (attempt - 1)) + Math.floor(Math.random() * 300);
+        await sleepMs(delay);
+        continue;
+      }
+
+      const hint =
+        '请检查：1) Base URL（例如 https://api.deepseek.com）是否可达 2) 系统代理 / VPN / 防火墙是否拦截 3) API Key 是否有效 4) 若在公司网络，可尝试切换网络或配置系统代理。';
+      throw new Error(`${flat}\n\n${hint}`);
     }
-    if (/fetch failed|failed to fetch|network/i.test(errMsg) || cause) {
-      throw new Error(
-        `${errMsg}${cause ? `（原因：${cause}）` : ''}\n\n请检查 Base URL 是否可达、系统代理/防火墙是否拦截，以及 API Key 是否有效。`
-      );
-    }
-    throw e instanceof Error ? e : new Error(errMsg);
-  } finally {
-    clearTimeout(t);
   }
 
-  if (!res.ok) {
-    const t2 = await res.text();
-    throw new Error(`DeepSeek 请求失败 HTTP ${res.status}: ${t2.slice(0, 800)}`);
-  }
-  const j = await res.json();
-  const content = j.choices?.[0]?.message?.content;
-  if (!content) throw new Error('DeepSeek 响应无有效内容');
-  return String(content);
+  throw new Error(lastFlat || 'DeepSeek 请求失败');
 }
 
 async function runAgentPipeline(userText) {
