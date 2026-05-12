@@ -2124,7 +2124,13 @@ function registerIpcHandlers() {
       if (!res.ok || !j.ok) {
         return { ok: false, error: j.error || `创建订单失败 HTTP ${res.status}` };
       }
-      return { ok: true, orderId: j.orderId, payUrl: j.payUrl || '', mock: Boolean(j.mock) };
+      return {
+        ok: true,
+        orderId: j.orderId,
+        payUrl: j.payUrl || '',
+        mock: Boolean(j.mock),
+        clientHintZh: String(j.clientHintZh || ''),
+      };
     } catch (e) {
       return { ok: false, error: String(e.message || e) };
     }

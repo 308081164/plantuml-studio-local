@@ -526,6 +526,13 @@ body.studio-agent-source-locked #source {
   overflow: auto;
 }
 
+.errors.errors--pay-hint {
+  background: #fff8e1;
+  color: #5d4037;
+  border-top-color: #ffe082;
+  max-height: 220px;
+}
+
 .foot {
   display: flex;
   align-items: center;

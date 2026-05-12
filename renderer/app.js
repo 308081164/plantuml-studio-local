@@ -229,13 +229,22 @@ async function beginPayUnlockFlow() {
     return;
   }
   pendingPayOrderId = cr.orderId || '';
+  const payHint = String(cr.clientHintZh || '').trim();
+  if (payHint && !cr.mock) {
+    showErrors([payHint], null, true);
+  }
   if (cr.payUrl && window.studio.payOpenExternal) {
     const openR = await window.studio.payOpenExternal(cr.payUrl);
     if (openR && openR.ok === false) {
       setStatus(openR.error || '无法打开浏览器', false);
       return;
     }
-    setStatus('若已打开支付页，完成支付后请点击「我已完成支付」', null);
+    setStatus(
+      payHint && !cr.mock
+        ? '已打开浏览器。若支付宝页显示「ISV权限不足」，请按上方黄色提示区说明在开放平台签约「电脑网站支付」。支付完成后请点击「我已完成支付」。'
+        : '若已打开支付页，完成支付后请点击「我已完成支付」',
+      null
+    );
   } else {
     setStatus('未返回支付链接（可能未启动支付服务）。可点击「本地模拟支付成功」临时解锁。', null);
   }
@@ -283,16 +292,18 @@ function setStatus(text, ok) {
  * @param {string[]} lines
  * @param {string | null} archiveKind 为 null 时不写入错误归档（仅界面提示）
  */
-function showErrors(lines, archiveKind = 'preview-plantuml') {
+function showErrors(lines, archiveKind = 'preview-plantuml', payHint = false) {
   const box = $('errors');
   if (!box) return;
   if (!lines.length) {
     box.classList.add('hidden');
     box.textContent = '';
+    box.classList.remove('errors--pay-hint');
     return;
   }
   const joined = lines.join('\n');
   box.textContent = joined;
+  box.classList.toggle('errors--pay-hint', Boolean(payHint));
   box.classList.remove('hidden');
   if (archiveKind) {
     reportErrorArchive(archiveKind, lines[0] || '错误', joined);

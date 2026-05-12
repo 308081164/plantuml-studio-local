@@ -37,7 +37,7 @@
 
 ### 支付宝（正式收款）
 
-在 [支付宝开放平台](https://open.alipay.com/) 创建移动应用或网页支付产品，完成签约后获取：
+在 [支付宝开放平台](https://open.alipay.com/) 创建应用，并**签约与本仓库接口一致的产品**：本服务使用 **`alipay.trade.page.pay`（电脑网站支付）**，仅开通「手机网站支付」或「当面付」而未开通「电脑网站支付」时，跳转支付宝常见错误 **`insufficient-isv-permissions`（ISV权限不足）**——需在开放平台 **产品中心** 为当前 App 签约 **电脑网站支付** 并待审核生效。完成签约后获取：
 
 | 变量名 | 说明 |
 |--------|------|
@@ -48,12 +48,21 @@
 
 **获取方式摘要：**
 
-1. 登录开放平台 → 控制台 → 创建应用 → 添加「手机网站支付」等能力。  
+1. 登录开放平台 → 控制台 → 创建应用 → 产品中心签约 **「电脑网站支付」**（与 `alipay.trade.page.pay` 对应）；勿仅签约手机网站支付后仍用本接口。  
 2. 「开发信息」中设置接口加签方式（RSA2），上传「应用公钥」后，保存平台返回的「支付宝公钥」→ 填入 `ALIPAY_PUBLIC_KEY`。  
 3. 你本地用工具生成的 PKCS8 私钥 → 填入 `ALIPAY_APP_PRIVATE_KEY`。  
 4. 在开放平台「应用信息」中配置 **授权回调地址**（与 `PUBLIC_BASE_URL` + 路径一致，外网可访问），异步通知指向 `https://你的域名/api/alipay/notify`。
 
 当前 `server/index.mjs` 已实现 **电脑网站支付** `alipay.trade.page.pay`（返回 `payUrl`）、**同步跳转页** `/pay/return` 与 **异步通知** `/api/alipay/notify`（`checkNotifySignV2` / `checkNotifySign` 验签）。
+
+**常见报错（支付宝黄色调试页）**
+
+| 错误代码 | 含义与处理 |
+|----------|------------|
+| `insufficient-isv-permissions` | 当前 App 未签约或未生效 **电脑网站支付**；在开放平台产品中心完成签约后再试。 |
+| 沙箱与正式混用 | 沙箱须使用 `ALIPAY_GATEWAY=https://openapi.alipaydev.com/gateway.do` 及沙箱 AppID/密钥；正式环境用 `openapi.alipay.com`。 |
+
+客户端在创建真实支付订单后，会在界面 **错误/提示区** 显示服务端下发的简要排查说明（便于用户未截图时也能看到）。
 
 ---
 
