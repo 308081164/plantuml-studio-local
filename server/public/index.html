@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PlantUML 本地工作室 — 产品介绍与在线转换</title>
+    <meta
+      name="description"
+      content="PlantUML 本地工作室：本地渲染、DeepSeek 智能生成、项目驱动制图、免费版与高级版。同一端口提供在线 PlantUML 预览。"
+    />
+    <link rel="stylesheet" href="/site.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="site-header-inner">
+        <a class="brand" href="/">
+          <span class="brand-mark">UML</span>
+          <span>PlantUML 本地工作室</span>
+        </a>
+        <nav class="nav" aria-label="主导航">
+          <a href="#features">功能</a>
+          <a href="#editions">版本</a>
+          <a href="#convert" data-jump="convert">在线转换</a>
+          <a href="#deploy">部署说明</a>
+          <a href="/api/health" target="_blank" rel="noopener">服务状态</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <h1>在本地完成 PlantUML 制图与渲染</h1>
+        <p class="hero-lead">
+          面向开发者与架构师的 Windows 桌面应用：内置 Java 与 PlantUML（PicoWeb）离线渲染，集成 DeepSeek
+          实现自然语言智能生成、项目目录驱动制图与静态架构草图。本页面由<strong>与支付回调相同的后端服务</strong>在默认端口
+          <strong>8848</strong> 提供，用于<strong>产品介绍</strong>与轻量<strong>在线 PlantUML 预览</strong>。
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="#convert" data-jump="convert">试用在线转换</a>
+          <a class="btn btn-secondary" href="#features">查看功能</a>
+        </div>
+      </section>
+
+      <section id="features" class="section">
+        <div class="section-head">
+          <h2>核心能力</h2>
+          <span>与开源仓库 README 描述一致的能力摘要</span>
+        </div>
+        <div class="feature-grid">
+          <article class="feature-card">
+            <h3>本地 PlantUML 渲染</h3>
+            <p>内置 JRE 与官方 PlantUML JAR，PicoWeb 模式下图表在本地生成 SVG / PNG，无需依赖外网渲染引擎即可完成常规制图。</p>
+          </article>
+          <article class="feature-card">
+            <h3>DeepSeek 智能生成</h3>
+            <p>自然语言描述需求，模型生成 PlantUML 源码；结合本地校验与多轮自动修正，降低语法错误与反复调试成本。</p>
+          </article>
+          <article class="feature-card">
+            <h3>项目目录驱动</h3>
+            <p>选择工程根目录，尊重 .gitignore 与自定义忽略规则；由模型判断是否需要读取仓库上下文，生成更贴近代码结构的图表。</p>
+          </article>
+          <article class="feature-card">
+            <h3>静态架构示意（studio-arch）</h3>
+            <p>针对「与仓库静态 import 结构一致」的模块依赖图，使用独立语法与黑白灰 SVG 渲染，与 PlantUML 路由分流。</p>
+          </article>
+          <article class="feature-card">
+            <h3>暂存与导出</h3>
+            <p>暂存区管理多幅产出；支持导出文件、复制预览 PNG。高级版无限制；免费版对智能生成结果有相应策略（以客户端为准）。</p>
+          </article>
+          <article class="feature-card">
+            <h3>支付与解锁（可选）</h3>
+            <p>自建轻量服务处理订单与支付宝异步通知验签；桌面端可唤起浏览器完成支付后回到客户端拉取解锁状态。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="editions" class="section">
+        <div class="section-head">
+          <h2>版本与许可</h2>
+          <span>GPL-3.0 · 以实际安装包与客户端界面为准</span>
+        </div>
+        <div class="compare">
+          <div class="compare-col">
+            <h3><span class="badge">免费版</span> 体验与智能生成</h3>
+            <ul>
+              <li>自行输入 PlantUML 源码渲染不受限（以客户端为准）</li>
+              <li>智能生成、水印与导出策略由客户端实现</li>
+              <li>可按需单次解锁或升级高级版</li>
+            </ul>
+          </div>
+          <div class="compare-col">
+            <h3><span class="badge badge-pro">高级版</span> 全功能</h3>
+            <ul>
+              <li>通过许可证激活后解锁完整能力</li>
+              <li>无智能生成会话锁定与水印等限制（以客户端为准）</li>
+              <li>适合团队与个人长期制图工作流</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section id="convert" class="section">
+        <div class="section-head">
+          <h2>在线 PlantUML 转换</h2>
+          <span>浏览器内粘贴源码 → 服务端转发 → 返回 SVG 预览</span>
+        </div>
+        <p style="font-size: 0.875rem; color: var(--color-fg-muted); margin: 0 0 1rem">
+          本功能用于<strong>公开展示与轻量试用</strong>。复杂图或高并发请使用<strong>桌面客户端本地渲染</strong>以获得更好体验与隐私控制。
+        </p>
+        <div class="convert-panel">
+          <div class="convert-toolbar">
+            <button type="button" class="btn btn-primary" id="btn-render">渲染预览</button>
+            <button type="button" class="btn btn-secondary" id="btn-load-sample">载入示例</button>
+          </div>
+          <div class="convert-body">
+            <div class="editor-wrap">
+              <label for="plantuml-source">PlantUML 源码</label>
+              <textarea id="plantuml-source" spellcheck="false" aria-label="PlantUML 源码编辑器"></textarea>
+            </div>
+            <div class="preview-wrap">
+              <label>预览（SVG）</label>
+              <div class="preview-inner" id="preview-mount">
+                <div class="preview-placeholder">点击「渲染预览」生成 SVG</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="callout">
+          <strong>隐私与数据流说明</strong>
+          您提交的源码将由本服务器使用官方算法编码后，向 <strong>PlantUML 公共服务</strong>（默认
+          <code>www.plantuml.com</code>，可通过环境变量 <code>PLANTUML_ONLINE_SVG_BASE</code> 覆盖）发起
+          HTTPS 请求以获取 SVG。请勿包含密钥、令牌或个人敏感数据。图表过大时可能超出在线预览 URL
+          长度上限，请使用桌面客户端本地渲染。生产站点建议为备案域名配置 HTTPS 反向代理，并将
+          <code>PUBLIC_BASE_URL</code> 设为该域名根地址以便支付回调一致。
+        </div>
+      </section>
+
+      <section id="deploy" class="section">
+        <div class="section-head">
+          <h2>与备案域名一同部署</h2>
+          <span>例如 uml.广厦智汇.com</span>
+        </div>
+        <p style="font-size: 0.875rem; color: var(--color-fg-muted)">
+          在反向代理（Nginx / 阿里云 SLB 等）上将 <strong>443</strong> 转发到本进程监听的
+          <strong>8848</strong>，启用 TLS 证书（中文域名需支持 IDN 的证书）。环境变量
+          <code>PUBLIC_BASE_URL</code> 应设为对外的 <code>https://</code> 根地址，与支付宝「电脑网站支付」材料中的网站域名保持一致，便于审核与回调验签。
+        </p>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="site-footer-inner">
+        <span>PlantUML 本地工作室 · 服务端组件（支付 / 发布元数据 / 本站静态页）</span>
+        <span><a href="/api/health">/api/health</a> · 端口与主进程一致（默认 8848）</span>
+      </div>
+    </footer>
+
+    <script src="/site.js" defer></script>
+  </body>
+</html>
