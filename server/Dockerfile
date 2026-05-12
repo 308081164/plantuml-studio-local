@@ -6,7 +6,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-COPY index.mjs online-deepseek.mjs ./
+COPY index.mjs online-deepseek.mjs load-env.mjs ./
 COPY public ./public
 
 ENV NODE_ENV=production
