@@ -107,6 +107,26 @@
         <p style="font-size: 0.875rem; color: var(--color-fg-muted); margin: 0 0 1rem">
           本功能用于<strong>公开展示与轻量试用</strong>。复杂图或高并发请使用<strong>桌面客户端本地渲染</strong>以获得更好体验与隐私控制。
         </p>
+        <p id="nl-status-line" class="nl-status-line" hidden></p>
+        <div class="nl-panel" id="nl-panel">
+          <h3 class="nl-panel-title">自然语言 → PlantUML（可选）</h3>
+          <p class="nl-panel-desc">
+            使用与桌面端兼容的 DeepSeek Chat API（OpenAI 式 <code>/v1/chat/completions</code>）。请在服务器
+            <code>.env</code> 中配置 <code>STUDIO_ONLINE_DEEPSEEK_API_KEY</code> 并可选配置 Base URL / 模型名，重启服务后生效；未配置时本区域不可用。
+          </p>
+          <label class="nl-label" for="nl-user-text">描述你想要的图（类图、时序图、用例等）</label>
+          <textarea
+            id="nl-user-text"
+            class="nl-textarea"
+            rows="4"
+            spellcheck="false"
+            placeholder="例如：画一个用户登录的时序图，包含浏览器、网关、认证服务和 MySQL"
+          ></textarea>
+          <div class="nl-actions">
+            <button type="button" class="btn btn-secondary" id="btn-nl-source-only">仅生成源码（填入左侧）</button>
+            <button type="button" class="btn btn-primary" id="btn-nl-generate-render">生成并渲染预览</button>
+          </div>
+        </div>
         <div class="convert-panel">
           <div class="convert-toolbar">
             <button type="button" class="btn btn-primary" id="btn-render">渲染预览</button>
@@ -129,8 +149,9 @@
           <strong>隐私与数据流说明</strong>
           您提交的源码将由本服务器使用官方算法编码后，向 <strong>PlantUML 公共服务</strong>（默认
           <code>www.plantuml.com</code>，可通过环境变量 <code>PLANTUML_ONLINE_SVG_BASE</code> 覆盖）发起
-          HTTPS 请求以获取 SVG。请勿包含密钥、令牌或个人敏感数据。图表过大时可能超出在线预览 URL
-          长度上限，请使用桌面客户端本地渲染。生产站点建议为备案域名配置 HTTPS 反向代理，并将
+          HTTPS 请求以获取 SVG。若使用下方「自然语言生成」，你的描述将发往服务器在 .env 中配置的 DeepSeek 兼容 API（
+          <code>STUDIO_ONLINE_DEEPSEEK_*</code>），模型输出的 PlantUML 再发往 PlantUML 公共服务。请勿在描述或源码中包含密钥、令牌或个人敏感数据。图表过大时可能超出在线预览
+          URL 长度上限，请使用桌面客户端本地渲染。生产站点建议为备案域名配置 HTTPS 反向代理，并将
           <code>PUBLIC_BASE_URL</code> 设为该域名根地址以便支付回调一致。
         </div>
       </section>

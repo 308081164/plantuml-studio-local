@@ -14,9 +14,15 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createRequire } from 'node:module';
+import dns from 'node:dns';
+import { generatePlantumlFromNaturalLanguage, isOnlineDeepseekConfigured } from './online-deepseek.mjs';
 
 const require = createRequire(import.meta.url);
 const { encode: encodePlantUML } = require('plantuml-encoder');
+
+if (typeof dns.setDefaultResultOrder === 'function') {
+  dns.setDefaultResultOrder('ipv4first');
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: join(__dirname, '.env') });
@@ -328,64 +334,140 @@ const PLANTUML_ONLINE_SVG_BASE = (
 /** GET 路径过长时易被网关截断，超过则提示使用桌面端 */
 const MAX_ENCODED_PATH_CHARS = 7500;
 
+/**
+ * @param {string} source
+ * @returns {Promise<{ ok: true, svg: string } | { ok: false, error: string, detail?: string }>}
+ */
+async function renderPlantumlSourceToSvg(source) {
+  const trimmed = String(source ?? '').replace(/^\uFEFF/, '').trim();
+  if (!trimmed) {
+    return { ok: false, error: '请输入 PlantUML 源码' };
+  }
+  if (source.length > MAX_PLANTUML_SOURCE_CHARS) {
+    return {
+      ok: false,
+      error: `源码长度超过上限（${MAX_PLANTUML_SOURCE_CHARS} 字符）`,
+    };
+  }
+  let encoded;
+  try {
+    encoded = encodePlantUML(source);
+  } catch (encErr) {
+    return { ok: false, error: `编码失败：${encErr.message || encErr}` };
+  }
+  if (encoded.length > MAX_ENCODED_PATH_CHARS) {
+    return {
+      ok: false,
+      error:
+        '图表过大，编码后超出在线预览 URL 上限。请精简图源或使用桌面客户端进行本地渲染。',
+    };
+  }
+  const url = `${PLANTUML_ONLINE_SVG_BASE}/${encoded}`;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 30_000);
+  let r;
+  try {
+    r = await fetch(url, {
+      method: 'GET',
+      signal: ac.signal,
+      headers: { Accept: 'image/svg+xml,text/plain,*/*' },
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  const text = await r.text();
+  if (!r.ok) {
+    return {
+      ok: false,
+      error: `PlantUML 在线服务返回 HTTP ${r.status}`,
+      detail: text.slice(0, 4000),
+    };
+  }
+  if (!text.includes('<svg')) {
+    return {
+      ok: false,
+      error: '渲染结果非有效 SVG（可能为语法错误提示页）',
+      detail: text.slice(0, 2000),
+    };
+  }
+  return { ok: true, svg: text };
+}
+
 app.post('/api/convert/plantuml', async (req, res) => {
   try {
     const source = String(req.body?.source ?? '').replace(/^\uFEFF/, '');
-    const trimmed = source.trim();
-    if (!trimmed) {
-      return res.status(400).json({ ok: false, error: '请输入 PlantUML 源码' });
+    const out = await renderPlantumlSourceToSvg(source);
+    if (!out.ok) {
+      const status = out.error.includes('上限') ? 413 : out.error.includes('编码') ? 400 : 502;
+      return res.status(status).json({ ok: false, error: out.error, detail: out.detail });
     }
-    if (source.length > MAX_PLANTUML_SOURCE_CHARS) {
-      return res.status(413).json({
-        ok: false,
-        error: `源码长度超过上限（${MAX_PLANTUML_SOURCE_CHARS} 字符）`,
-      });
-    }
-    let encoded;
-    try {
-      encoded = encodePlantUML(source);
-    } catch (encErr) {
-      return res.status(400).json({ ok: false, error: `编码失败：${encErr.message || encErr}` });
-    }
-    if (encoded.length > MAX_ENCODED_PATH_CHARS) {
-      return res.status(413).json({
-        ok: false,
-        error:
-          '图表过大，编码后超出在线预览 URL 上限。请精简图源或使用桌面客户端进行本地渲染。',
-      });
-    }
-    const url = `${PLANTUML_ONLINE_SVG_BASE}/${encoded}`;
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), 30_000);
-    let r;
-    try {
-      r = await fetch(url, {
-        method: 'GET',
-        signal: ac.signal,
-        headers: { Accept: 'image/svg+xml,text/plain,*/*' },
-      });
-    } finally {
-      clearTimeout(timer);
-    }
-    const text = await r.text();
-    if (!r.ok) {
-      return res.status(502).json({
-        ok: false,
-        error: `PlantUML 在线服务返回 HTTP ${r.status}`,
-        detail: text.slice(0, 4000),
-      });
-    }
-    if (!text.includes('<svg')) {
-      return res.status(502).json({
-        ok: false,
-        error: '渲染结果非有效 SVG（可能为语法错误提示页）',
-        detail: text.slice(0, 2000),
-      });
-    }
-    return res.json({ ok: true, svg: text });
+    return res.json({ ok: true, svg: out.svg });
   } catch (e) {
     const msg = e?.name === 'AbortError' ? '渲染超时，请缩小图表或稍后重试' : String(e?.message || e);
     return res.status(502).json({ ok: false, error: msg });
+  }
+});
+
+const MAX_NL_USER_CHARS = 12_000;
+
+app.get('/api/public/online-ai', (_req, res) => {
+  res.json({
+    ok: true,
+    deepseekConfigured: isOnlineDeepseekConfigured(),
+  });
+});
+
+app.post('/api/convert/plantuml-nl', async (req, res) => {
+  try {
+    if (!isOnlineDeepseekConfigured()) {
+      return res.status(503).json({
+        ok: false,
+        code: 'deepseek_not_configured',
+        error:
+          '服务端未配置 STUDIO_ONLINE_DEEPSEEK_API_KEY，自然语言生成不可用。请在 .env 中填写该字段后重启服务。',
+      });
+    }
+    const userText = String(req.body?.userText ?? '').replace(/^\uFEFF/, '').trim();
+    if (!userText) {
+      return res.status(400).json({ ok: false, error: '请输入自然语言描述' });
+    }
+    if (userText.length > MAX_NL_USER_CHARS) {
+      return res.status(413).json({
+        ok: false,
+        error: `描述过长（上限 ${MAX_NL_USER_CHARS} 字符）`,
+      });
+    }
+    const renderSvg = req.body?.renderSvg !== false;
+    let plantuml;
+    try {
+      plantuml = await generatePlantumlFromNaturalLanguage(userText);
+    } catch (e) {
+      return res.status(502).json({ ok: false, error: String(e.message || e) });
+    }
+    if (!plantuml || !/@start/i.test(plantuml)) {
+      return res.status(502).json({
+        ok: false,
+        error: '模型未返回有效 PlantUML 源码（未检测到 @start…）',
+        detail: plantuml?.slice(0, 800),
+      });
+    }
+    if (!renderSvg) {
+      return res.json({ ok: true, plantuml });
+    }
+    const svgOut = await renderPlantumlSourceToSvg(plantuml);
+    if (!svgOut.ok) {
+      return res.json({
+        ok: true,
+        plantuml,
+        svg: null,
+        renderWarning: svgOut.error,
+        renderDetail: svgOut.detail,
+      });
+    }
+    return res.json({ ok: true, plantuml, svg: svgOut.svg });
+  } catch (e) {
+    console.error('[api/convert/plantuml-nl]', e);
+    return res.status(500).json({ ok: false, error: String(e.message || e) });
   }
 });
 

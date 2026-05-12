@@ -422,6 +422,82 @@ main {
   color: #9a6700;
 }
 
+.nl-status-line {
+  margin: 0 0 1rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border-default);
+  background: var(--color-canvas-subtle);
+  font-size: 0.8125rem;
+  color: var(--color-fg-muted);
+}
+
+.nl-status-line.nl-status-line--ok {
+  border-color: #0969da33;
+  background: #ddf4ff;
+  color: #0550ae;
+}
+
+.nl-panel {
+  margin-bottom: 1.25rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius);
+  background: var(--color-canvas-subtle);
+}
+
+.nl-panel.nl-panel--disabled {
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+.nl-panel-title {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.nl-panel-desc {
+  margin: 0 0 0.75rem;
+  font-size: 0.8125rem;
+  color: var(--color-fg-muted);
+  line-height: 1.45;
+}
+
+.nl-label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.35rem;
+}
+
+.nl-textarea {
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius);
+  font-family: var(--font-stack);
+  font-size: 0.875rem;
+  line-height: 1.45;
+  resize: vertical;
+  min-height: 5rem;
+  margin-bottom: 0.75rem;
+}
+
+.nl-textarea:focus {
+  outline: 2px solid var(--color-accent-fg);
+  outline-offset: 0;
+}
+
+.nl-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 .site-footer {
   margin-top: 4rem;
   padding: 2rem 1.5rem;
