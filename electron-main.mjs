@@ -438,6 +438,25 @@ function buildAgentSystemPromptForProject(kbPayload, cfg) {
 const PLANTUML_RETRY_HINT =
   '\n\n【PlantUML 常见修复】`title` 只能写单行标题；不要在 `title ...` 内写字面量 `\\n` 或拆成第二行。副标题请用 `caption ...`、`header` / `right header` 或 `floating note`。请输出与下面「当前源码」不完全相同、且可被 PlantUML 解析的完整源码。';
 
+/** 制图前「是否结合本地仓库」路由：单独一次轻量 chat，输出 JSON */
+const PROJECT_ROUTE_MODEL_SYSTEM = [
+  '你是「制图需求路由」判别器，只根据用户一句自然语言判断：若要高质量完成其制图意图，是否**必须**结合其**本地代码仓库**中的文件内容（例如读 import/模块关系、对照实现、按指定路径或文件名作图等）。',
+  '',
+  '【need_project = true 的典型情况】',
+  '- 明确要求根据/结合/对照「项目、仓库、工程、代码、源码、某目录/文件、类/函数在代码里的位置」等。',
+  '- 要画与「当前代码库」强绑定的依赖图、调用链、模块边界、分层、与真实路径一致的组件图等。',
+  '- 出现明显仓库语境：路径片段、扩展名（.ts/.py 等）、包目录名且语义依赖源码。',
+  '',
+  '【need_project = false 的典型情况】',
+  '- 纯业务/教学抽象：角色为「用户、订单、数据库」等通用名词，不要求读本地文件。',
+  '- 仅「画登录时序图」「画 ER」等常规 UML，且未要求对齐本仓库实现。',
+  '',
+  '只输出 **一个** JSON 对象，不要 markdown 围栏，不要其它文字。字段：',
+  '- need_project: boolean',
+  '- confidence: 0 到 1 的小数（你对判断的把握）',
+  '- reason_zh: 不超过 80 字的中文简要理由',
+].join('\n');
+
 const PROJECT_PLANNER_SYSTEM = [
   '你是资深软件架构分析助手。',
   '用户会给出「制图目标」和一份 JSONL 文件清单（每行一个 JSON：path, bytes, ext, head）。',
@@ -683,6 +702,10 @@ async function deepseekChat(config, messages, options = {}) {
       : 0.2;
 
   const maxAttempts = Math.max(1, Math.min(6, Number(options.fetchMaxAttempts) || 4));
+  const timeoutMs =
+    typeof options.timeoutMs === 'number' && Number.isFinite(options.timeoutMs)
+      ? Math.max(5000, Math.min(180000, options.timeoutMs))
+      : 120000;
   const body = JSON.stringify({
     model: config.model,
     messages,
@@ -693,7 +716,7 @@ async function deepseekChat(config, messages, options = {}) {
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 120000);
+    const t = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const res = await fetch(url, {
         method: 'POST',
@@ -730,7 +753,7 @@ async function deepseekChat(config, messages, options = {}) {
       lastFlat = flat;
 
       if (name === 'AbortError' || /\babort(ed)?\b/i.test(flat)) {
-        throw new Error('DeepSeek 请求超时（120 秒）');
+        throw new Error(`DeepSeek 请求超时（${Math.round(timeoutMs / 1000)} 秒）`);
       }
 
       const transient =
@@ -750,6 +773,79 @@ async function deepseekChat(config, messages, options = {}) {
   }
 
   throw new Error(lastFlat || 'DeepSeek 请求失败');
+}
+
+/**
+ * @param {string} raw
+ * @returns {{ needProject: boolean, confidence: number, reasonZh: string } | null}
+ */
+function parseNeedProjectRouteDecision(raw) {
+  const text = String(raw || '').trim();
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  let j;
+  try {
+    j = JSON.parse(m[0]);
+  } catch {
+    return null;
+  }
+  const np = j.need_project ?? j.needProject;
+  const needProject = np === true || np === 'true' || np === 1 || np === '1';
+  let conf = Number(j.confidence);
+  if (!Number.isFinite(conf)) conf = 0.65;
+  conf = Math.max(0, Math.min(1, conf));
+  const reasonZh = String(j.reason_zh ?? j.reasonZh ?? j.reason ?? '').slice(0, 200);
+  return { needProject, confidence: conf, reasonZh };
+}
+
+/**
+ * 已选项目根时：优先由 DeepSeek 判别是否应走「结合仓库读文件」管线；失败或输出非法时回退规则 wantsProjectCodeContext。
+ * @returns {{ needProject: boolean, confidence: number, reasonZh: string, from: 'model'|'rules-fallback'|'rules-no-key' }}
+ */
+async function classifyNeedProjectWithDeepSeek(userText, cfg) {
+  const ut = String(userText || '').trim();
+  if (!ut) {
+    return { needProject: false, confidence: 1, reasonZh: '空需求', from: 'model' };
+  }
+  if (!(cfg.apiKey || '').trim()) {
+    const fb = wantsProjectCodeContext(ut);
+    return {
+      needProject: fb,
+      confidence: fb ? 0.55 : 0.45,
+      reasonZh: '未配置 API Key，使用本地规则路由',
+      from: 'rules-no-key',
+    };
+  }
+
+  try {
+    const raw = await deepseekChat(
+      cfg,
+      [
+        { role: 'system', content: PROJECT_ROUTE_MODEL_SYSTEM },
+        { role: 'user', content: `用户需求：\n${ut.slice(0, 6000)}` },
+      ],
+      { temperature: 0.05, fetchMaxAttempts: 3, timeoutMs: 28000 }
+    );
+    const parsed = parseNeedProjectRouteDecision(raw);
+    if (!parsed) {
+      const fb = wantsProjectCodeContext(ut);
+      return {
+        needProject: fb,
+        confidence: fb ? 0.52 : 0.48,
+        reasonZh: '模型输出无法解析为 JSON，已规则回退',
+        from: 'rules-fallback',
+      };
+    }
+    return { ...parsed, from: 'model' };
+  } catch (e) {
+    const fb = wantsProjectCodeContext(ut);
+    return {
+      needProject: fb,
+      confidence: 0,
+      reasonZh: `路由模型调用失败：${String(e.message || e).slice(0, 160)}；规则回退`,
+      from: 'rules-fallback',
+    };
+  }
 }
 
 async function runAgentPipeline(userText) {
@@ -843,13 +939,14 @@ async function runAgentPipeline(userText) {
 }
 
 /**
- * 单一入口：无项目根 / 需求未体现读仓库意图 → runAgentPipeline；否则 → runAgentPipelineWithProject。
+ * 单一入口：无项目根 → 仅需求；有项目根 → 先由 DeepSeek 判别是否结合仓库（失败则规则回退）。
  * @param {string} ignoreGlobsText
  */
 async function runAgentPipelineAdaptive(userText, projectRootFromUi, ignoreGlobsText) {
   const ut = String(userText || '').trim();
+  const cfg = loadAgentConfig();
   const rootFromUi = String(projectRootFromUi || '').trim();
-  const root = rootFromUi || String(loadAgentConfig().lastProjectRoot || '').trim();
+  const root = rootFromUi || String(cfg.lastProjectRoot || '').trim();
 
   if (!root) {
     const r = await runAgentPipeline(ut);
@@ -859,21 +956,23 @@ async function runAgentPipelineAdaptive(userText, projectRootFromUi, ignoreGlobs
     };
   }
 
-  if (!wantsProjectCodeContext(ut)) {
+  const dec = await classifyNeedProjectWithDeepSeek(ut, cfg);
+  const useProject =
+    dec.from === 'model' ? dec.needProject && dec.confidence >= 0.4 : Boolean(dec.needProject);
+  const line = `[routing:${dec.from}] need_project=${dec.needProject} confidence=${Number(dec.confidence).toFixed(2)} ${dec.reasonZh || ''}`;
+
+  if (!useProject) {
     const r = await runAgentPipeline(ut);
     return {
       ...r,
-      logs: [
-        '[routing] 已选项目目录，但需求未出现「读仓库 / 代码路径 / 依赖…」等明确信号 → 自动采用仅按需求生成，避免无关任务扫描仓库。（可在需求中写明「根据本项目源码…」等以启用结合项目。）',
-        ...(r.logs || []),
-      ],
+      logs: [line, ...(r.logs || [])],
     };
   }
 
   const r = await runAgentPipelineWithProject(ut, root, ignoreGlobsText);
   return {
     ...r,
-    logs: [`[routing] 结合项目目录生成：${root}`, ...(r.logs || [])],
+    logs: [line, `[routing] 结合项目目录生成：${root}`, ...(r.logs || [])],
   };
 }
 

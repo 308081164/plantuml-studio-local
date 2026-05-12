@@ -67,14 +67,14 @@
             </div>
             <textarea id="agent-request" rows="6" spellcheck="false" placeholder="例如：画一个用户登录的时序图，包含前端、网关、认证服务与数据库…"></textarea>
             <p class="agent-nl-routing-hint">
-              单次点击将<strong>自动</strong>选择：未选项目目录、或需求与仓库无关时仅按文字生成；出现「根据项目 / 源码路径 / 依赖…」等信号时再结合已选目录与选文件规划。
+              已选项目目录时，会先<strong>单独调用 DeepSeek</strong>判断本次需求是否应结合仓库读文件；不需要则仅按文字生成。模型不可用或 JSON 解析失败时，会<strong>回退本地关键词规则</strong>。未选目录则始终仅按需求生成。
             </p>
             <div class="agent-nl-actions">
               <button
                 type="button"
                 id="btn-agent-run"
                 class="primary"
-                title="自动决定仅需求或结合项目：结合项目时会先由模型从文件清单中规划 paths，失败则启发式选文件，再读取正文生成 PlantUML。"
+                title="路由：有项目目录时由 DeepSeek 判别是否读仓库；通过后进入项目制图（规划选文件 + 读摘要）。路由失败时回退规则。"
               >
                 智能生成 PlantUML
               </button>
