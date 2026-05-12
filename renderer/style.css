@@ -430,6 +430,13 @@ button:hover {
   min-height: 5rem;
 }
 
+.agent-nl-routing-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
 .agent-nl-actions {
   margin-top: 0.45rem;
   display: flex;

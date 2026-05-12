@@ -54,7 +54,11 @@ import {
   formatManifestJsonl,
   parsePlannerPaths,
 } from './scripts/project-context.mjs';
-import { classifyDiagramIntent, shouldApplyChinaUnivPostProcess } from './scripts/agent-intent.mjs';
+import {
+  classifyDiagramIntent,
+  shouldApplyChinaUnivPostProcess,
+  wantsProjectCodeContext,
+} from './scripts/agent-intent.mjs';
 import { buildArchAgentSystemPrompt } from './scripts/arch-agent-prompt.mjs';
 import { buildKnowledgeInjection, resolveJarLabelFromDirs } from './scripts/kb-inject.mjs';
 import { parseEditorDocument } from './scripts/diagram-grammar.mjs';
@@ -838,6 +842,41 @@ async function runAgentPipeline(userText) {
   return { ok: false, source, error: lastErr || '已达最大重试次数', logs };
 }
 
+/**
+ * 单一入口：无项目根 / 需求未体现读仓库意图 → runAgentPipeline；否则 → runAgentPipelineWithProject。
+ * @param {string} ignoreGlobsText
+ */
+async function runAgentPipelineAdaptive(userText, projectRootFromUi, ignoreGlobsText) {
+  const ut = String(userText || '').trim();
+  const rootFromUi = String(projectRootFromUi || '').trim();
+  const root = rootFromUi || String(loadAgentConfig().lastProjectRoot || '').trim();
+
+  if (!root) {
+    const r = await runAgentPipeline(ut);
+    return {
+      ...r,
+      logs: ['[routing] 未选择项目目录 → 仅按需求生成（不含仓库文件上下文）。', ...(r.logs || [])],
+    };
+  }
+
+  if (!wantsProjectCodeContext(ut)) {
+    const r = await runAgentPipeline(ut);
+    return {
+      ...r,
+      logs: [
+        '[routing] 已选项目目录，但需求未出现「读仓库 / 代码路径 / 依赖…」等明确信号 → 自动采用仅按需求生成，避免无关任务扫描仓库。（可在需求中写明「根据本项目源码…」等以启用结合项目。）',
+        ...(r.logs || []),
+      ],
+    };
+  }
+
+  const r = await runAgentPipelineWithProject(ut, root, ignoreGlobsText);
+  return {
+    ...r,
+    logs: [`[routing] 结合项目目录生成：${root}`, ...(r.logs || [])],
+  };
+}
+
 async function runAgentPipelineWithProject(userText, projectRoot, ignoreGlobsText) {
   const root = String(projectRoot || '').trim();
   if (!root) return { ok: false, error: '未选择项目目录', logs: [] };
@@ -1484,11 +1523,14 @@ function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle('studio:agent-run', async (_e, { userText }) => {
+  ipcMain.handle('studio:agent-run', async (_e, payload) => {
     try {
-      const text = String(userText || '').trim();
+      const p = payload != null && typeof payload === 'object' ? payload : { userText: payload };
+      const text = String(p.userText ?? '').trim();
+      const projectRoot = p.projectRoot != null ? String(p.projectRoot).trim() : '';
+      const ignoreGlobsText = p.ignoreGlobsText;
       if (!text) return { ok: false, error: '请输入自然语言需求', logs: [] };
-      const r = await runAgentPipeline(text);
+      const r = await runAgentPipelineAdaptive(text, projectRoot, ignoreGlobsText);
       if (r.ok && !isProEdition()) {
         setAgentSessionLock(r.source);
         return {

@@ -1412,7 +1412,11 @@ async function runAgent() {
   }
   setStatus('DeepSeek 编排运行中…', null);
   try {
-    const r = await window.studio.runAgent(userText);
+    const r = await window.studio.runAgent({
+      userText,
+      projectRoot: selectedProjectRoot,
+      ignoreGlobsText: projectIgnoreGlobsValue(),
+    });
     await applyAgentRunResult(r);
   } catch (e) {
     const msg = String(e.message || e);
@@ -1489,32 +1493,6 @@ async function estimateProjectContext() {
   }
 }
 
-async function runAgentProjectOneClick() {
-  if (!window.studio?.runAgentProject) return;
-  const goal = $('agent-request').value.trim();
-  if (!goal) {
-    setStatus('请填写「自然语言需求」作为制图目标', false);
-    return;
-  }
-  if (!selectedProjectRoot) {
-    setStatus('请先选择项目目录', false);
-    return;
-  }
-  setStatus('DeepSeek 规划选文件 + 制图运行中…', null);
-  try {
-    const r = await window.studio.runAgentProject({
-      userText: goal,
-      projectRoot: selectedProjectRoot,
-      ignoreGlobsText: projectIgnoreGlobsValue(),
-    });
-    await applyAgentRunResult(r);
-  } catch (e) {
-    const msg = String(e.message || e);
-    setStatus(msg, false);
-    reportErrorArchive('agent-project-exception', msg);
-  }
-}
-
 async function runAgentArchDraft() {
   if (!window.studio?.runAgentArchDraft) return;
   const goal = $('agent-request').value.trim();
@@ -1544,7 +1522,7 @@ async function runAgentArchDraft() {
 function openSessionLogDialog() {
   const dlg = $('session-log-dialog');
   const body = $('session-log-dialog-body');
-  body.textContent = lastSessionExecutionLog.trim() || '（尚未运行过「智能生成」或「项目一键制图」，或本轮无日志输出）';
+  body.textContent = lastSessionExecutionLog.trim() || '（尚未运行过「智能生成 PlantUML」，或本轮无日志输出）';
   dlg.showModal();
 }
 
@@ -1685,7 +1663,6 @@ function init() {
 
   $('btn-save-agent-cfg').addEventListener('click', () => saveAgentForm());
   $('btn-agent-run').addEventListener('click', () => runAgent());
-  $('btn-agent-project')?.addEventListener('click', () => runAgentProjectOneClick());
   $('btn-agent-arch-draft')?.addEventListener('click', () => runAgentArchDraft());
 
   $('btn-project-pick')?.addEventListener('click', () => pickProjectDirectory());

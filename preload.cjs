@@ -46,7 +46,8 @@ contextBridge.exposeInMainWorld('studio', {
   },
   getAgentConfig: () => ipcRenderer.invoke('studio:agent-config-get'),
   setAgentConfig: (partial) => ipcRenderer.invoke('studio:agent-config-set', partial),
-  runAgent: (userText) => ipcRenderer.invoke('studio:agent-run', { userText }),
+  runAgent: (payload) =>
+    ipcRenderer.invoke('studio:agent-run', typeof payload === 'string' ? { userText: payload } : payload ?? {}),
   pickProjectDirectory: () => ipcRenderer.invoke('studio:pick-project-directory'),
   projectSummary: (rootPath) => ipcRenderer.invoke('studio:project-summary', { rootPath }),
   runAgentProject: (payload) => ipcRenderer.invoke('studio:agent-run-project', payload),
