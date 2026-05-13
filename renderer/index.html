@@ -65,7 +65,14 @@
             <div class="agent-nl-header">
               <label for="agent-request">自然语言需求</label>
             </div>
-            <textarea id="agent-request" rows="6" spellcheck="false" placeholder="例如：画一个用户登录的时序图，包含前端、网关、认证服务与数据库…"></textarea>
+            <textarea
+              id="agent-request"
+              rows="6"
+              spellcheck="false"
+              title="最多 3000 字；超出会在输入或粘贴后自动截断并提示"
+              placeholder="例如：画一个用户登录的时序图，包含前端、网关、认证服务与数据库…"
+            ></textarea>
+            <p id="agent-request-hint" class="agent-request-hint" aria-live="polite"></p>
             <p class="agent-nl-routing-hint">
               已选项目目录时，会先<strong>单独调用 DeepSeek</strong>判断本次需求是否应结合仓库读文件；不需要则仅按文字生成。模型不可用或 JSON 解析失败时，会<strong>回退本地关键词规则</strong>。未选目录则始终仅按需求生成。
             </p>
@@ -83,7 +90,7 @@
               </button>
             </div>
           </section>
-          <textarea id="source" spellcheck="false"></textarea>
+          <textarea id="source" spellcheck="false" title="PlantUML 源码（无字数上限）"></textarea>
         </div>
       </section>
       <div class="resizer" id="resizer" title="拖拽调整面板宽度"></div>

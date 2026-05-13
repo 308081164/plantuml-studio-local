@@ -79,6 +79,9 @@ let skipExitConfirmOnce = false;
 /** 免费版：智能生成成功后的会话锁（明文仅驻主进程） */
 let agentSessionLock = null;
 
+/** 自然语言 Agent 需求最大字符数（与 renderer/app.js 中 AGENT_REQUEST_MAX_CHARS 一致） */
+const AGENT_USER_TEXT_MAX_CHARS = 3000;
+
 function quitAppWithoutConfirm() {
   skipExitConfirmOnce = true;
   app.quit();
@@ -1629,6 +1632,13 @@ function registerIpcHandlers() {
       const projectRoot = p.projectRoot != null ? String(p.projectRoot).trim() : '';
       const ignoreGlobsText = p.ignoreGlobsText;
       if (!text) return { ok: false, error: '请输入自然语言需求', logs: [] };
+      if (text.length > AGENT_USER_TEXT_MAX_CHARS) {
+        return {
+          ok: false,
+          error: `自然语言需求最长 ${AGENT_USER_TEXT_MAX_CHARS} 字`,
+          logs: [],
+        };
+      }
       const r = await runAgentPipelineAdaptive(text, projectRoot, ignoreGlobsText);
       if (r.ok && !isProEdition()) {
         setAgentSessionLock(r.source);
@@ -1680,7 +1690,9 @@ function registerIpcHandlers() {
       const mfLen = Math.min(2200, manifest.files.length);
       const { header, footer } = buildProjectUserBlockParts({
         root,
-        userGoal: String(userSample || '').trim() || '（空需求占位）',
+        userGoal: String(userSample || '')
+          .trim()
+          .slice(0, AGENT_USER_TEXT_MAX_CHARS) || '（空需求占位）',
         manifestLineCount: mfLen,
         manifestTruncated: manifest.files.length > 2200,
         skippedSecrets: manifest.stats.skippedSecrets,
@@ -1715,6 +1727,13 @@ function registerIpcHandlers() {
     try {
       const text = String(userText || '').trim();
       if (!text) return { ok: false, error: '请填写「自然语言需求」作为制图目标', logs: [] };
+      if (text.length > AGENT_USER_TEXT_MAX_CHARS) {
+        return {
+          ok: false,
+          error: `自然语言需求最长 ${AGENT_USER_TEXT_MAX_CHARS} 字`,
+          logs: [],
+        };
+      }
       const r = await runAgentPipelineWithProject(text, projectRoot, ignoreGlobsText);
       if (r.ok && !isProEdition()) {
         setAgentSessionLock(r.source);
@@ -1751,6 +1770,13 @@ function registerIpcHandlers() {
     try {
       const text = String(userText || '').trim();
       if (!text) return { ok: false, error: '请填写自然语言需求', logs: [] };
+      if (text.length > AGENT_USER_TEXT_MAX_CHARS) {
+        return {
+          ok: false,
+          error: `自然语言需求最长 ${AGENT_USER_TEXT_MAX_CHARS} 字`,
+          logs: [],
+        };
+      }
       if (!String(projectRoot || '').trim()) {
         return { ok: false, error: '未选择项目目录', logs: [] };
       }

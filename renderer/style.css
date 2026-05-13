@@ -430,6 +430,22 @@ button:hover {
   min-height: 5rem;
 }
 
+.agent-request-hint {
+  margin: 0.3rem 0 0;
+  font-size: 0.7rem;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.agent-request-hint.agent-request-hint--near {
+  color: #9a6700;
+}
+
+.agent-request-hint.agent-request-hint--warn {
+  color: #cf222e;
+  font-weight: 600;
+}
+
 .agent-nl-routing-hint {
   margin: 0.35rem 0 0;
   font-size: 0.72rem;

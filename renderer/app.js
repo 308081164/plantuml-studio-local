@@ -1,6 +1,9 @@
 import { isLockedPlaceholderText } from '../scripts/agent-session-lock.mjs';
 import { parseEditorDocument } from '../scripts/diagram-grammar.mjs';
 
+/** Agent 自然语言输入框最大字符数（PlantUML 源码 #source 不设字数上限） */
+const AGENT_REQUEST_MAX_CHARS = 3000;
+
 const DEFAULT_SOURCE = `@startuml
 title 示例
 Alice -> Bob : 本地渲染
@@ -1167,10 +1170,12 @@ function wireStashGrid() {
 function toggleAgentNLPanel() {
   const wrap = $('agent-nl-wrap');
   const btn = $('btn-toggle-agent');
-  
+  if (!wrap || !btn) return;
+
   if (wrap.classList.contains('hidden')) {
     wrap.classList.remove('hidden');
     btn.textContent = '隐藏 Agent';
+    syncAgentRequestCounter();
   } else {
     wrap.classList.add('hidden');
     btn.textContent = 'Agent 绘制';
@@ -1403,8 +1408,33 @@ async function applyAgentRunResult(r) {
   }
 }
 
+function syncAgentRequestCounter() {
+  const ta = $('agent-request');
+  const hint = $('agent-request-hint');
+  if (!ta) return;
+  let v = ta.value;
+  let clipped = false;
+  if (v.length > AGENT_REQUEST_MAX_CHARS) {
+    v = v.slice(0, AGENT_REQUEST_MAX_CHARS);
+    ta.value = v;
+    clipped = true;
+  }
+  const len = v.length;
+  if (hint) {
+    hint.textContent = clipped
+      ? `已超过 ${AGENT_REQUEST_MAX_CHARS} 字上限，多出的内容已截断。当前 ${len} / ${AGENT_REQUEST_MAX_CHARS} 字`
+      : `${len} / ${AGENT_REQUEST_MAX_CHARS} 字`;
+    hint.classList.toggle('agent-request-hint--warn', len >= AGENT_REQUEST_MAX_CHARS);
+    hint.classList.toggle(
+      'agent-request-hint--near',
+      len >= AGENT_REQUEST_MAX_CHARS - 200 && len < AGENT_REQUEST_MAX_CHARS
+    );
+  }
+}
+
 async function runAgent() {
   if (!window.studio?.runAgent) return;
+  syncAgentRequestCounter();
   const userText = $('agent-request').value.trim();
   if (!userText) {
     setStatus('请填写自然语言需求', false);
@@ -1467,6 +1497,7 @@ async function estimateProjectContext() {
     setStatus('请先选择项目目录', false);
     return;
   }
+  syncAgentRequestCounter();
   setStatus('正在估算上下文体积（不调用 DeepSeek）…', null);
   try {
     const r = await window.studio.projectContextEstimate({
@@ -1495,6 +1526,7 @@ async function estimateProjectContext() {
 
 async function runAgentArchDraft() {
   if (!window.studio?.runAgentArchDraft) return;
+  syncAgentRequestCounter();
   const goal = $('agent-request').value.trim();
   if (!goal) {
     setStatus('请填写自然语言需求（例如：标出 renderer 与 electron-main 的依赖关系）', false);
@@ -1665,6 +1697,11 @@ function init() {
   $('btn-agent-run').addEventListener('click', () => runAgent());
   $('btn-agent-arch-draft')?.addEventListener('click', () => runAgentArchDraft());
 
+  $('agent-request')?.addEventListener('input', () => syncAgentRequestCounter());
+  $('agent-request')?.addEventListener('paste', () => {
+    queueMicrotask(() => syncAgentRequestCounter());
+  });
+
   $('btn-project-pick')?.addEventListener('click', () => pickProjectDirectory());
 
   $('btn-stash-add').addEventListener('click', () => openStashAddDialog());
@@ -1724,7 +1761,11 @@ function init() {
   }
 
   wireAppDialogs();
-  loadAgentForm().then(() => syncAgentLockFromMain());
+  syncAgentRequestCounter();
+  loadAgentForm().then(() => {
+    syncAgentLockFromMain();
+    syncAgentRequestCounter();
+  });
   refreshStashList().catch(() => {});
 
   wireLicenseDialog();
