@@ -141,6 +141,16 @@ body.studio-edition-pro .topbar {
   white-space: nowrap;
 }
 
+.project-path.project-path--set {
+  font-weight: 600;
+  color: var(--text);
+  background: rgba(31, 111, 235, 0.08);
+  border: 1px solid rgba(31, 111, 235, 0.35);
+  border-radius: 999px;
+  padding: 0.12rem 0.45rem;
+  max-width: min(420px, 42vw);
+}
+
 .project-pick-btn {
   display: inline-flex;
   align-items: center;
@@ -1179,4 +1189,128 @@ body.studio-agent-source-locked #source {
   white-space: pre-wrap;
   max-height: 120px;
   overflow: auto;
+}
+
+/* ---------- 全屏 AI 处理中 / Toast ---------- */
+.studio-busy-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 18, 23, 0.42);
+  backdrop-filter: blur(2px);
+}
+
+.studio-busy-overlay.hidden {
+  display: none;
+}
+
+.studio-busy-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1.25rem 1.75rem;
+  min-width: 220px;
+  max-width: 90vw;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 40px rgba(1, 4, 9, 0.18);
+}
+
+.studio-busy-spinner {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  animation: studio-busy-spin 0.75s linear infinite;
+}
+
+@keyframes studio-busy-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.studio-busy-message {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+  text-align: center;
+}
+
+.studio-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.5rem;
+  transform: translateX(-50%) translateY(120%);
+  z-index: 10001;
+  max-width: min(420px, 92vw);
+  padding: 0.55rem 0.9rem;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  font-weight: 500;
+  box-shadow: 0 6px 24px rgba(1, 4, 9, 0.2);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  transition: transform 0.22s ease, opacity 0.22s ease;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.studio-toast.studio-toast--visible {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+}
+
+.studio-toast.studio-toast--success {
+  border-color: rgba(26, 127, 55, 0.45);
+  background: rgba(216, 251, 224, 0.95);
+  color: #116329;
+}
+
+.studio-toast.studio-toast--error {
+  border-color: rgba(207, 34, 46, 0.45);
+  background: rgba(255, 235, 233, 0.96);
+  color: #a40e26;
+}
+
+.studio-toast.studio-toast--info {
+  border-color: rgba(31, 111, 235, 0.35);
+  background: rgba(230, 240, 255, 0.96);
+  color: #0a3069;
+}
+
+.project-switch-match-wrap {
+  margin-top: 0.5rem;
+}
+
+.project-switch-label {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+}
+
+.project-switch-select {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 0.82rem;
+  padding: 0.35rem 0.45rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--editor-bg);
+  color: var(--text);
+}
+
+.project-switch-actions {
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }

@@ -85,6 +85,13 @@ const $ = (id) => document.getElementById(id);
 /** 当前选择的项目根目录（与主进程配置 lastProjectRoot 同步） */
 let selectedProjectRoot = '';
 
+function normalizeProjectRoot(p) {
+  return String(p || '')
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/\/+$/, '');
+}
+
 /** 顶栏项目路径为 span，必须使用 textContent 回显（误用 .value 会导致选择目录后不显示） */
 function syncProjectRootDisplay(absolutePath) {
   const el = $('project-root-display');
@@ -94,6 +101,8 @@ function syncProjectRootDisplay(absolutePath) {
       ? String(absolutePath).trim()
       : String(selectedProjectRoot || '').trim();
   el.textContent = p || '未选择项目目录…';
+  el.title = p || '';
+  el.classList.toggle('project-path--set', Boolean(p));
 }
 
 /** 国内高校模式开关 */
@@ -113,6 +122,116 @@ let svgEditor = null;
 
 /** 是否处于画板编辑模式 */
 let isInEditMode = false;
+
+let studioBusyDepth = 0;
+
+function beginStudioBusy(message) {
+  studioBusyDepth += 1;
+  const overlay = $('studio-busy-overlay');
+  const msg = $('studio-busy-message');
+  if (msg) msg.textContent = message || '正在处理…';
+  overlay?.classList.remove('hidden');
+}
+
+function endStudioBusy() {
+  studioBusyDepth = Math.max(0, studioBusyDepth - 1);
+  if (studioBusyDepth === 0) {
+    $('studio-busy-overlay')?.classList.add('hidden');
+  }
+}
+
+let studioToastTimer = null;
+
+function showToast(message, variant = 'info', duration = 4000) {
+  const el = $('studio-toast');
+  if (!el) return;
+  clearTimeout(studioToastTimer);
+  const v = variant === 'success' || variant === 'error' ? variant : 'info';
+  el.textContent = String(message || '');
+  el.className = `studio-toast studio-toast--${v}`;
+  requestAnimationFrame(() => {
+    el.classList.add('studio-toast--visible');
+  });
+  studioToastTimer = setTimeout(() => {
+    el.classList.remove('studio-toast--visible');
+  }, duration);
+}
+
+let projectSwitchResolver = null;
+let projectSwitchSettled = false;
+
+function wireProjectSwitchDialogOnce() {
+  const dlg = $('project-switch-dialog');
+  if (!dlg || dlg.dataset.wired === '1') return;
+  dlg.dataset.wired = '1';
+  const finish = (payload) => {
+    if (projectSwitchSettled) return;
+    projectSwitchSettled = true;
+    const fn = projectSwitchResolver;
+    projectSwitchResolver = null;
+    if (typeof fn === 'function') fn(payload);
+    if (dlg.open) dlg.close();
+  };
+  dlg.addEventListener('cancel', (e) => {
+    e.preventDefault();
+    finish({ kind: 'new' });
+  });
+  $('project-switch-resume')?.addEventListener('click', () => {
+    const sel = $('project-switch-conv-select');
+    const id = sel?.value;
+    if (!id) return;
+    finish({ kind: 'resume', conversationId: id });
+  });
+  $('project-switch-new')?.addEventListener('click', () => finish({ kind: 'new' }));
+  $('project-switch-close')?.addEventListener('click', () => finish({ kind: 'new' }));
+}
+
+/**
+ * @param {{ pickedPath: string, previousLabel: string, matches: Array<object> }} opts
+ * @returns {Promise<{ kind: 'new' } | { kind: 'resume', conversationId: string }>}
+ */
+function openProjectSwitchDialog(opts) {
+  const pickedPath = String(opts?.pickedPath || '').trim();
+  const previousLabel = String(opts?.previousLabel ?? '');
+  const matches = Array.isArray(opts?.matches) ? opts.matches : [];
+  return new Promise((resolve) => {
+    wireProjectSwitchDialogOnce();
+    projectSwitchSettled = false;
+    projectSwitchResolver = resolve;
+    const dlg = $('project-switch-dialog');
+    const lead = $('project-switch-lead');
+    const wrap = $('project-switch-match-wrap');
+    const noM = $('project-switch-no-match');
+    const btnResume = $('project-switch-resume');
+    const sel = $('project-switch-conv-select');
+    if (!dlg || !lead || !wrap || !noM || !btnResume || !sel) {
+      resolve({ kind: 'new' });
+      return;
+    }
+    lead.textContent = `新的项目目录：\n${pickedPath}\n\n此前顶栏为：${previousLabel || '（未选择）'}\n\n为避免多轮上下文与错误仓库混杂，请选择：恢复该目录下的历史对话，或新建一条对话并绑定新路径。`;
+    sel.innerHTML = '';
+    if (matches.length) {
+      wrap.classList.remove('hidden');
+      noM.classList.add('hidden');
+      btnResume.classList.remove('hidden');
+      for (const c of matches) {
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        const title = String(c.title || '').trim() || c.id.slice(0, 8);
+        const t = c.updatedAt ? new Date(c.updatedAt).toLocaleString() : '';
+        opt.textContent = t ? `${title} · ${t}` : title;
+        sel.appendChild(opt);
+      }
+    } else {
+      wrap.classList.add('hidden');
+      btnResume.classList.add('hidden');
+      noM.classList.remove('hidden');
+      noM.textContent =
+        '该目录下尚无已保存的对话记录。将新建一条对话并绑定此路径（可在「对话」下拉里切换其它会话）。';
+    }
+    dlg.showModal();
+  });
+}
 
 function projectIgnoreGlobsValue() {
   const el = $('cfg-project-ignore-globs');
@@ -157,6 +276,7 @@ function ensureActiveAgentConversation() {
       id,
       title: '新对话',
       updatedAt: Date.now(),
+      projectRoot: '',
       messages: [],
     });
     agentConversationsState.activeId = id;
@@ -208,6 +328,9 @@ async function loadAgentConversationsFromDisk() {
       conversations: st.conversations,
     };
   }
+  for (const c of agentConversationsState.conversations) {
+    if (c.projectRoot == null) c.projectRoot = '';
+  }
   ensureActiveAgentConversation();
   renderAgentChatSelectUi();
 }
@@ -218,6 +341,7 @@ async function createNewAgentConversation() {
     id,
     title: '新对话',
     updatedAt: Date.now(),
+    projectRoot: normalizeProjectRoot(selectedProjectRoot),
     messages: [],
   });
   agentConversationsState.activeId = id;
@@ -249,11 +373,23 @@ function onAgentChatSelectChange() {
   const id = sel.value;
   if (!id) return;
   agentConversationsState.activeId = id;
-  const ta = $('agent-request');
-  if (ta) ta.value = '';
-  syncAgentRequestCounter();
-  void persistAgentConversations();
-  setStatus('已切换对话（需求输入框已清空；源码区未改动）', true);
+  const c = getActiveAgentConversation();
+  const bind = normalizeProjectRoot(c?.projectRoot || '');
+  void (async () => {
+    if (bind && bind !== normalizeProjectRoot(selectedProjectRoot)) {
+      selectedProjectRoot = String(c.projectRoot || '').trim();
+      syncProjectRootDisplay(selectedProjectRoot);
+      if (window.studio?.setAgentConfig) {
+        await window.studio.setAgentConfig({ lastProjectRoot: selectedProjectRoot });
+      }
+      showToast('已随对话切换到其绑定的项目目录', 'success');
+    }
+    const ta = $('agent-request');
+    if (ta) ta.value = '';
+    syncAgentRequestCounter();
+    await persistAgentConversations();
+    setStatus('已切换对话（需求输入框已清空；源码区未改动）', true);
+  })();
 }
 
 function getActiveConversationHistoryForApi() {
@@ -268,6 +404,9 @@ async function appendSuccessfulAgentTurn(userText, assistantPlantumlSource) {
   const ut = String(userText || '').trim();
   const as = String(assistantPlantumlSource || '').trim();
   if (!ut || !as) return;
+  if (!normalizeProjectRoot(c.projectRoot) && normalizeProjectRoot(selectedProjectRoot)) {
+    c.projectRoot = normalizeProjectRoot(selectedProjectRoot);
+  }
   c.messages.push({ role: 'user', content: ut });
   c.messages.push({ role: 'assistant', content: as });
   c.updatedAt = Date.now();
@@ -1586,9 +1725,11 @@ async function runAgent() {
   const userText = $('agent-request').value.trim();
   if (!userText) {
     setStatus('请填写自然语言需求', false);
+    showToast('请填写自然语言需求', 'info');
     return;
   }
   setStatus('DeepSeek 编排运行中…', null);
+  beginStudioBusy('DeepSeek 正在生成 PlantUML…');
   try {
     const r = await window.studio.runAgent({
       userText,
@@ -1599,11 +1740,17 @@ async function runAgent() {
     await applyAgentRunResult(r);
     if (r?.ok && r.source) {
       await appendSuccessfulAgentTurn(userText, r.source);
+      showToast('PlantUML 智能生成成功', 'success');
+    } else if (r && r.ok === false) {
+      showToast(r.error || '生成失败', 'error');
     }
   } catch (e) {
     const msg = String(e.message || e);
     setStatus(msg, false);
+    showToast(msg, 'error');
     reportErrorArchive('agent-exception', msg);
+  } finally {
+    endStudioBusy();
   }
 }
 
@@ -1628,29 +1775,86 @@ async function pickProjectDirectory() {
   const r = await window.studio.pickProjectDirectory();
   if (r.canceled) return;
   if (!r?.ok) {
-    setStatus(r?.error || '无法选择项目目录', false);
+    const err = r?.error || '无法选择项目目录';
+    setStatus(err, false);
+    showToast(err, 'error');
     return;
   }
   if (!r.path) return;
-  selectedProjectRoot = r.path;
-  syncProjectRootDisplay(r.path);
-  if (window.studio.setAgentConfig) {
-    const sr = await window.studio.setAgentConfig({ lastProjectRoot: r.path });
-    if (sr && sr.ok === false) {
-      setStatus(sr.error || '已选目录，但未授权无法保存到配置。', false);
-    }
+  const picked = String(r.path).trim();
+  const nextN = normalizeProjectRoot(picked);
+  const prevN = normalizeProjectRoot(selectedProjectRoot);
+
+  if (nextN === prevN) {
+    showToast('项目目录未变化', 'info');
+    return;
   }
-  openProjectImportedDialog(r.path);
+
+  const matches = agentConversationsState.conversations
+    .filter((c) => normalizeProjectRoot(c.projectRoot) === nextN)
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+
+  const active = getActiveAgentConversation();
+  const activeN = normalizeProjectRoot(active?.projectRoot || '');
+  const activeHasMessages = Boolean(active?.messages?.length);
+  const needsSwitchPrompt =
+    activeHasMessages || (activeN && activeN !== nextN) || (prevN && prevN !== nextN);
+
+  const applyPickedToConfig = async () => {
+    selectedProjectRoot = picked;
+    syncProjectRootDisplay(picked);
+    if (window.studio.setAgentConfig) {
+      const sr = await window.studio.setAgentConfig({ lastProjectRoot: picked });
+      if (sr && sr.ok === false) {
+        setStatus(sr.error || '已选目录，但未授权无法保存到配置。', false);
+        showToast(sr.error || '未授权：目录未保存到配置', 'error');
+      }
+    }
+  };
+
+  if (!needsSwitchPrompt) {
+    await applyPickedToConfig();
+    if (active) {
+      active.projectRoot = picked;
+      await persistAgentConversations();
+    }
+    openProjectImportedDialog(picked);
+    showToast('已绑定项目目录到当前对话', 'success');
+    return;
+  }
+
+  const choice = await openProjectSwitchDialog({
+    pickedPath: picked,
+    previousLabel: prevN || '(未选择)',
+    matches,
+  });
+  await applyPickedToConfig();
+
+  if (choice.kind === 'resume' && choice.conversationId) {
+    agentConversationsState.activeId = choice.conversationId;
+    const ta = $('agent-request');
+    if (ta) ta.value = '';
+    syncAgentRequestCounter();
+    renderAgentChatSelectUi();
+    await persistAgentConversations();
+    showToast('已切换到该目录的历史对话', 'success');
+    return;
+  }
+
+  await createNewAgentConversation();
+  showToast('已新建对话并绑定到新项目目录', 'success');
 }
 
 async function estimateProjectContext() {
   if (!window.studio?.projectContextEstimate) return;
   if (!selectedProjectRoot) {
     setStatus('请先选择项目目录', false);
+    showToast('请先选择项目目录', 'info');
     return;
   }
   syncAgentRequestCounter();
   setStatus('正在估算上下文体积（不调用 DeepSeek）…', null);
+  beginStudioBusy('正在估算项目上下文…');
   try {
     const r = await window.studio.projectContextEstimate({
       rootPath: selectedProjectRoot,
@@ -1659,6 +1863,7 @@ async function estimateProjectContext() {
     });
     if (!r?.ok) {
       setStatus(r?.error || '估算失败', false);
+      showToast(r?.error || '估算失败', 'error');
       reportErrorArchive('estimate-context', r?.error || '估算失败', JSON.stringify(r, null, 2).slice(0, 4000));
       return;
     }
@@ -1669,10 +1874,14 @@ async function estimateProjectContext() {
       `粗算首轮约 ${r.estimatedTokens} tokens；可分析文件 ${r.manifestFileEntries} 个、正文聚合 ${r.bundleFileCount} 个；密钥模式已跳过 ${r.skippedSecrets} 条路径。${warn}`,
       !r.exceedsProductLimit
     );
+    showToast(r.exceedsProductLimit ? '估算完成：已超过粗算上限' : '上下文估算完成', r.exceedsProductLimit ? 'error' : 'success');
   } catch (e) {
     const msg = String(e.message || e);
     setStatus(msg, false);
+    showToast(msg, 'error');
     reportErrorArchive('estimate-exception', msg);
+  } finally {
+    endStudioBusy();
   }
 }
 
@@ -1682,13 +1891,16 @@ async function runAgentArchDraft() {
   const goal = $('agent-request').value.trim();
   if (!goal) {
     setStatus('请填写自然语言需求（例如：标出 renderer 与 electron-main 的依赖关系）', false);
+    showToast('请填写自然语言需求', 'info');
     return;
   }
   if (!selectedProjectRoot) {
     setStatus('请先选择项目目录', false);
+    showToast('请先选择项目目录', 'info');
     return;
   }
   setStatus('DeepSeek 正在生成 @studio-arch 草稿（独立知识库）…', null);
+  beginStudioBusy('DeepSeek 正在生成静态架构草稿…');
   try {
     const r = await window.studio.runAgentArchDraft({
       userText: goal,
@@ -1696,10 +1908,18 @@ async function runAgentArchDraft() {
       ignoreGlobsText: projectIgnoreGlobsValue(),
     });
     await applyAgentRunResult(r);
+    if (r?.ok) {
+      showToast('@studio-arch 草稿生成成功', 'success');
+    } else if (r && r.ok === false) {
+      showToast(r.error || '生成失败', 'error');
+    }
   } catch (e) {
     const msg = String(e.message || e);
     setStatus(msg, false);
+    showToast(msg, 'error');
     reportErrorArchive('agent-arch-draft-exception', msg);
+  } finally {
+    endStudioBusy();
   }
 }
 

@@ -119,7 +119,12 @@ function readAgentConversationsState() {
       ok: true,
       state: {
         activeId: typeof j.activeId === 'string' ? j.activeId : null,
-        conversations: j.conversations.filter((c) => c && typeof c.id === 'string' && Array.isArray(c.messages)),
+        conversations: j.conversations
+          .filter((c) => c && typeof c.id === 'string' && Array.isArray(c.messages))
+          .map((c) => ({
+            ...c,
+            projectRoot: typeof c.projectRoot === 'string' ? c.projectRoot : '',
+          })),
       },
     };
   } catch (e) {
@@ -134,6 +139,7 @@ function writeAgentConversationsState(state) {
     id: String(c.id || ''),
     title: String(c.title || '未命名对话').slice(0, 120),
     updatedAt: Number(c.updatedAt) || Date.now(),
+    projectRoot: String(c.projectRoot ?? '').trim().slice(0, 4096),
     messages: Array.isArray(c.messages)
       ? c.messages
           .filter((m) => m && (m.role === 'user' || m.role === 'assistant'))
@@ -1019,7 +1025,7 @@ async function runAgentPipeline(userText, conversationHistory = []) {
 
 /**
  * 单一入口：无项目根 → 仅需求；有项目根 → 先由 DeepSeek 判别是否结合仓库（失败则规则回退）。
- * 若存在多轮对话历史，则不再走「读仓库」路径，避免规划阶段与历史语义冲突。
+ * 多轮对话历史会注入到生成阶段；若路由仍选择「读仓库」，则每轮重新执行规划与选文件。
  * @param {string} ignoreGlobsText
  * @param {Array<{role:string,content:string}>} [conversationHistory]
  */
@@ -1028,25 +1034,16 @@ async function runAgentPipelineAdaptive(userText, projectRootFromUi, ignoreGlobs
   const cfg = loadAgentConfig();
   const histArr = Array.isArray(conversationHistory) ? conversationHistory : [];
   const histForModel = buildDeepseekHistoryMessages(histArr);
-  if (histForModel.length > 0) {
-    const r = await runAgentPipeline(ut, histArr);
-    return {
-      ...r,
-      logs: [
-        '[chat] 多轮对话：本轮不附带仓库全文（如需重新结合项目目录请先「新建对话」）。',
-        ...(r.logs || []),
-      ],
-    };
-  }
 
   const rootFromUi = String(projectRootFromUi || '').trim();
   const root = rootFromUi || String(cfg.lastProjectRoot || '').trim();
 
   if (!root) {
-    const r = await runAgentPipeline(ut, []);
+    const r = await runAgentPipeline(ut, histArr);
+    const chatNote = histForModel.length ? ['[chat] 已携带多轮对话历史（未选择项目目录，未读仓库）。'] : [];
     return {
       ...r,
-      logs: ['[routing] 未选择项目目录 → 仅按需求生成（不含仓库文件上下文）。', ...(r.logs || [])],
+      logs: [...chatNote, '[routing] 未选择项目目录 → 仅按需求生成（不含仓库文件上下文）。', ...(r.logs || [])],
     };
   }
 
@@ -1056,17 +1053,19 @@ async function runAgentPipelineAdaptive(userText, projectRootFromUi, ignoreGlobs
   const line = `[routing:${dec.from}] need_project=${dec.needProject} confidence=${Number(dec.confidence).toFixed(2)} ${dec.reasonZh || ''}`;
 
   if (!useProject) {
-    const r = await runAgentPipeline(ut, []);
+    const r = await runAgentPipeline(ut, histArr);
+    const chatNote = histForModel.length ? ['[chat] 已携带多轮历史；本轮路由为纯文本生成（未读仓库）。'] : [];
     return {
       ...r,
-      logs: [line, ...(r.logs || [])],
+      logs: [line, ...chatNote, ...(r.logs || [])],
     };
   }
 
-  const r = await runAgentPipelineWithProject(ut, root, ignoreGlobsText, []);
+  const chatNote2 = histForModel.length ? ['[chat] 已携带多轮历史；本轮将重新规划并读取仓库（与首轮相同流程）。'] : [];
+  const r = await runAgentPipelineWithProject(ut, root, ignoreGlobsText, histArr);
   return {
     ...r,
-    logs: [line, `[routing] 结合项目目录生成：${root}`, ...(r.logs || [])],
+    logs: [line, ...chatNote2, `[routing] 结合项目目录生成：${root}`, ...(r.logs || [])],
   };
 }
 
