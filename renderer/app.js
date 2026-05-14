@@ -130,6 +130,154 @@ function reportErrorArchive(kind, message, detail = '') {
 
 let pendingPayOrderId = '';
 
+/** 本地持久化的智能 PlantUML 对话（多轮） */
+let agentConversationsState = { activeId: null, conversations: [] };
+
+function newAgentChatId() {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+  } catch {
+    /* ignore */
+  }
+  return `chat-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function getActiveAgentConversation() {
+  const id = agentConversationsState.activeId;
+  if (!id) return null;
+  return agentConversationsState.conversations.find((c) => c.id === id) || null;
+}
+
+function ensureActiveAgentConversation() {
+  if (!agentConversationsState.conversations.length) {
+    const id = newAgentChatId();
+    agentConversationsState.conversations.push({
+      id,
+      title: '新对话',
+      updatedAt: Date.now(),
+      messages: [],
+    });
+    agentConversationsState.activeId = id;
+    return;
+  }
+  if (
+    !agentConversationsState.activeId ||
+    !agentConversationsState.conversations.some((c) => c.id === agentConversationsState.activeId)
+  ) {
+    agentConversationsState.activeId = agentConversationsState.conversations[0].id;
+  }
+}
+
+function renderAgentChatSelectUi() {
+  const sel = $('agent-chat-select');
+  if (!sel) return;
+  sel.innerHTML = '';
+  const list = [...agentConversationsState.conversations].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  for (const c of list) {
+    const opt = document.createElement('option');
+    opt.value = c.id;
+    const t = String(c.title || '').trim() || c.id.slice(0, 8);
+    opt.textContent = t;
+    sel.appendChild(opt);
+  }
+  if (agentConversationsState.activeId) sel.value = agentConversationsState.activeId;
+}
+
+async function persistAgentConversations() {
+  if (!window.studio?.agentConversationsSave) return;
+  await window.studio.agentConversationsSave(agentConversationsState);
+}
+
+async function loadAgentConversationsFromDisk() {
+  if (!window.studio?.agentConversationsLoad) return;
+  const r = await window.studio.agentConversationsLoad();
+  const st = r?.state;
+  if (r?.ok === false) {
+    agentConversationsState = { activeId: null, conversations: [] };
+    ensureActiveAgentConversation();
+    renderAgentChatSelectUi();
+    return;
+  }
+  if (!st || !Array.isArray(st.conversations)) {
+    agentConversationsState = { activeId: null, conversations: [] };
+  } else {
+    agentConversationsState = {
+      activeId: typeof st.activeId === 'string' ? st.activeId : null,
+      conversations: st.conversations,
+    };
+  }
+  ensureActiveAgentConversation();
+  renderAgentChatSelectUi();
+}
+
+async function createNewAgentConversation() {
+  const id = newAgentChatId();
+  agentConversationsState.conversations.unshift({
+    id,
+    title: '新对话',
+    updatedAt: Date.now(),
+    messages: [],
+  });
+  agentConversationsState.activeId = id;
+  const ta = $('agent-request');
+  if (ta) ta.value = '';
+  syncAgentRequestCounter();
+  renderAgentChatSelectUi();
+  await persistAgentConversations();
+  setStatus('已新建对话（多轮上下文已重置）', true);
+}
+
+async function deleteActiveAgentConversation() {
+  const id = agentConversationsState.activeId;
+  if (!id) return;
+  agentConversationsState.conversations = agentConversationsState.conversations.filter((c) => c.id !== id);
+  agentConversationsState.activeId = null;
+  ensureActiveAgentConversation();
+  const ta = $('agent-request');
+  if (ta) ta.value = '';
+  syncAgentRequestCounter();
+  renderAgentChatSelectUi();
+  await persistAgentConversations();
+  setStatus('已删除对话', true);
+}
+
+function onAgentChatSelectChange() {
+  const sel = $('agent-chat-select');
+  if (!sel) return;
+  const id = sel.value;
+  if (!id) return;
+  agentConversationsState.activeId = id;
+  const ta = $('agent-request');
+  if (ta) ta.value = '';
+  syncAgentRequestCounter();
+  void persistAgentConversations();
+  setStatus('已切换对话（需求输入框已清空；源码区未改动）', true);
+}
+
+function getActiveConversationHistoryForApi() {
+  const c = getActiveAgentConversation();
+  if (!c || !Array.isArray(c.messages)) return [];
+  return c.messages.map((m) => ({ role: m.role, content: String(m.content || '') }));
+}
+
+async function appendSuccessfulAgentTurn(userText, assistantPlantumlSource) {
+  const c = getActiveAgentConversation();
+  if (!c) return;
+  const ut = String(userText || '').trim();
+  const as = String(assistantPlantumlSource || '').trim();
+  if (!ut || !as) return;
+  c.messages.push({ role: 'user', content: ut });
+  c.messages.push({ role: 'assistant', content: as });
+  c.updatedAt = Date.now();
+  if (!c.title || c.title === '新对话' || c.title.length < 2) {
+    c.title = ut.length > 40 ? `${ut.slice(0, 40)}…` : ut;
+  }
+  renderAgentChatSelectUi();
+  await persistAgentConversations();
+}
+
 async function getEffectivePlantumlBundle() {
   if (window.studio?.getEffectivePlantumlSource) {
     const r = await window.studio.getEffectivePlantumlSource({ editorText: $('source').value });
@@ -379,9 +527,7 @@ skinparam activity {
 
 async function render() {
   const bundle = await getEffectivePlantumlBundle();
-  const grammarText = document.body.classList.contains('studio-agent-source-locked')
-    ? bundle.source
-    : $('source').value;
+  const grammarText = bundle.locked ? bundle.source : $('source').value;
   const doc = parseEditorDocument(grammarText);
 
   const fmtEl = $('format');
@@ -517,9 +663,7 @@ async function exportFile() {
     return;
   }
   const bundle = await getEffectivePlantumlBundle();
-  const grammarText = document.body.classList.contains('studio-agent-source-locked')
-    ? bundle.source
-    : $('source').value;
+  const grammarText = bundle.locked ? bundle.source : $('source').value;
   const doc = parseEditorDocument(grammarText);
 
   if (doc.kind === 'studio-arch') {
@@ -647,12 +791,13 @@ async function copyPreviewPngToClipboard() {
     }
 
     if (!svgWrap.classList.contains('hidden')) {
-      const doc = parseEditorDocument($('source').value);
+      const bundle = await getEffectivePlantumlBundle();
+      const grammarText = bundle.locked ? bundle.source : $('source').value;
+      const doc = parseEditorDocument(grammarText);
       if (doc.kind === 'studio-arch') {
         setStatus('静态架构图为 SVG：请使用「导出」下载，或从预览区复制 SVG 源码（暂不支持转 PNG 剪贴板）', false);
         return;
       }
-      const bundle = await getEffectivePlantumlBundle();
       const source = bundle.source;
       const png = await window.studio.renderPngToBuffer(source);
       if (!png?.ok) {
@@ -1176,6 +1321,7 @@ function toggleAgentNLPanel() {
     wrap.classList.remove('hidden');
     btn.textContent = '隐藏 Agent';
     syncAgentRequestCounter();
+    renderAgentChatSelectUi();
   } else {
     wrap.classList.add('hidden');
     btn.textContent = 'Agent 绘制';
@@ -1367,6 +1513,7 @@ function onChinaUnivModeToggle() {
         $('source').value = CHINA_UNIV_DEFAULT_SOURCE;
       }
       setStatus(isChinaUnivMode ? '国内高校模式已开启' : '国内高校模式已关闭', true);
+      void syncAgentLockFromMain();
     });
     return;
   }
@@ -1375,6 +1522,7 @@ function onChinaUnivModeToggle() {
     $('source').value = CHINA_UNIV_DEFAULT_SOURCE;
   }
   setStatus(isChinaUnivMode ? '国内高校模式已开启' : '国内高校模式已关闭', true);
+  void syncAgentLockFromMain();
 }
 
 async function applyAgentRunResult(r) {
@@ -1446,8 +1594,12 @@ async function runAgent() {
       userText,
       projectRoot: selectedProjectRoot,
       ignoreGlobsText: projectIgnoreGlobsValue(),
+      conversationHistory: getActiveConversationHistoryForApi(),
     });
     await applyAgentRunResult(r);
+    if (r?.ok && r.source) {
+      await appendSuccessfulAgentTurn(userText, r.source);
+    }
   } catch (e) {
     const msg = String(e.message || e);
     setStatus(msg, false);
@@ -1669,24 +1821,26 @@ function init() {
 
   let lockOverrideTimer = null;
   $('source').addEventListener('input', () => {
-    if (!document.body.classList.contains('studio-agent-source-locked')) return;
-    const v = $('source').value;
-    if (isLockedPlaceholderText(v)) return;
-    clearTimeout(lockOverrideTimer);
-    lockOverrideTimer = setTimeout(async () => {
-      if (!window.studio?.agentLockUserOverride) return;
-      const r = await window.studio.agentLockUserOverride({ editorText: $('source').value });
-      if (r?.ok) {
-        $('source').value = r.editorText || '';
-        $('source').readOnly = false;
-        document.body.classList.remove('studio-agent-source-locked');
-        setPreviewLockOverlay(false);
-        updatePayUnlockButtonsVisible(false);
-        pendingPayOrderId = '';
-        setStatus('已改为手写模式，智能生成锁定已解除', true);
-        await render();
-      }
-    }, 500);
+    void (async () => {
+      if (!(await isUiAgentLocked())) return;
+      const v = $('source').value;
+      if (isLockedPlaceholderText(v)) return;
+      clearTimeout(lockOverrideTimer);
+      lockOverrideTimer = setTimeout(async () => {
+        if (!window.studio?.agentLockUserOverride) return;
+        const r = await window.studio.agentLockUserOverride({ editorText: $('source').value });
+        if (r?.ok) {
+          $('source').value = r.editorText || '';
+          $('source').readOnly = false;
+          document.body.classList.remove('studio-agent-source-locked');
+          setPreviewLockOverlay(false);
+          updatePayUnlockButtonsVisible(false);
+          pendingPayOrderId = '';
+          setStatus('已改为手写模式，智能生成锁定已解除', true);
+          await render();
+        }
+      }, 500);
+    })();
   });
 
   $('format').addEventListener('change', clearPreview);
@@ -1701,6 +1855,10 @@ function init() {
   $('agent-request')?.addEventListener('paste', () => {
     queueMicrotask(() => syncAgentRequestCounter());
   });
+
+  $('agent-chat-select')?.addEventListener('change', () => onAgentChatSelectChange());
+  $('btn-agent-chat-new')?.addEventListener('click', () => void createNewAgentConversation());
+  $('btn-agent-chat-delete')?.addEventListener('click', () => void deleteActiveAgentConversation());
 
   $('btn-project-pick')?.addEventListener('click', () => pickProjectDirectory());
 
@@ -1762,6 +1920,7 @@ function init() {
 
   wireAppDialogs();
   syncAgentRequestCounter();
+  void loadAgentConversationsFromDisk();
   loadAgentForm().then(() => {
     syncAgentLockFromMain();
     syncAgentRequestCounter();

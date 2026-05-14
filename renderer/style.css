@@ -417,6 +417,42 @@ button:hover {
   margin-bottom: 0.2rem;
 }
 
+.agent-chat-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  margin: 0.25rem 0 0.4rem;
+}
+
+.agent-chat-toolbar__label {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.agent-chat-select {
+  flex: 1;
+  min-width: 8rem;
+  max-width: 18rem;
+  font-size: 0.78rem;
+  padding: 0.25rem 0.35rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--editor-bg);
+  color: var(--text);
+}
+
+.agent-chat-btn {
+  font-size: 0.72rem !important;
+  padding: 0.22rem 0.45rem !important;
+}
+
+.agent-nl-routing-hint__sub {
+  display: block;
+  margin-top: 0.25rem;
+  opacity: 0.92;
+}
+
 .agent-nl-wrap textarea {
   width: 100%;
   border: 1px solid var(--border);

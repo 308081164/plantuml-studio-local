@@ -99,4 +99,6 @@ contextBridge.exposeInMainWorld('studio', {
   payRedeemUnlock: (unlockToken) => ipcRenderer.invoke('studio:pay-redeem-unlock', { unlockToken }),
   payOpenExternal: (url) => ipcRenderer.invoke('studio:pay-open-external', { url }),
   payLocalMockComplete: () => ipcRenderer.invoke('studio:pay-local-mock-complete'),
+  agentConversationsLoad: () => ipcRenderer.invoke('studio:agent-conversations-load'),
+  agentConversationsSave: (state) => ipcRenderer.invoke('studio:agent-conversations-save', state),
 });

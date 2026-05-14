@@ -65,6 +65,16 @@
             <div class="agent-nl-header">
               <label for="agent-request">自然语言需求</label>
             </div>
+            <div class="agent-chat-toolbar" role="group" aria-label="多轮对话">
+              <label class="agent-chat-toolbar__label" for="agent-chat-select">对话</label>
+              <select id="agent-chat-select" class="agent-chat-select" title="切换本地保存的对话上下文"></select>
+              <button type="button" id="btn-agent-chat-new" class="ghost agent-chat-btn" title="清空多轮上下文并开始新会话">
+                新建对话
+              </button>
+              <button type="button" id="btn-agent-chat-delete" class="ghost agent-chat-btn" title="删除当前对话及其本地记录">
+                删除当前
+              </button>
+            </div>
             <textarea
               id="agent-request"
               rows="6"
@@ -75,6 +85,9 @@
             <p id="agent-request-hint" class="agent-request-hint" aria-live="polite"></p>
             <p class="agent-nl-routing-hint">
               已选项目目录时，会先<strong>单独调用 DeepSeek</strong>判断本次需求是否应结合仓库读文件；不需要则仅按文字生成。模型不可用或 JSON 解析失败时，会<strong>回退本地关键词规则</strong>。未选目录则始终仅按需求生成。
+              <span class="agent-nl-routing-hint__sub">
+                多轮微调：同一对话内后续请求会带上此前用户说明与模型输出的 PlantUML；此时不再附带仓库全文，如需重新读目录请先点「新建对话」。
+              </span>
             </p>
             <div class="agent-nl-actions">
               <button
