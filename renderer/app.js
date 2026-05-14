@@ -1825,7 +1825,7 @@ async function pickProjectDirectory() {
 
   const choice = await openProjectSwitchDialog({
     pickedPath: picked,
-    previousLabel: prevN || '(未选择)',
+    previousLabel: String(selectedProjectRoot || '').trim() || '(未选择)',
     matches,
   });
   await applyPickedToConfig();
