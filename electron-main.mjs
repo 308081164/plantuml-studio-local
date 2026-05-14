@@ -82,6 +82,78 @@ let agentSessionLock = null;
 /** 自然语言 Agent 需求最大字符数（与 renderer/app.js 中 AGENT_REQUEST_MAX_CHARS 一致） */
 const AGENT_USER_TEXT_MAX_CHARS = 3000;
 
+/** 多轮对话：注入 DeepSeek 的历史条数上限（user/assistant 交替） */
+const MAX_AGENT_CHAT_MESSAGES = 16;
+const MAX_AGENT_CHAT_MSG_CHARS = 12000;
+
+function buildDeepseekHistoryMessages(history) {
+  if (!Array.isArray(history) || !history.length) return [];
+  const cleaned = [];
+  for (const m of history) {
+    const role = m?.role === 'assistant' ? 'assistant' : m?.role === 'user' ? 'user' : null;
+    if (!role) continue;
+    const content = String(m?.content ?? '').trim();
+    if (!content) continue;
+    cleaned.push({ role, content: content.slice(0, MAX_AGENT_CHAT_MSG_CHARS) });
+  }
+  if (cleaned.length <= MAX_AGENT_CHAT_MESSAGES) return cleaned;
+  return cleaned.slice(-MAX_AGENT_CHAT_MESSAGES);
+}
+
+function agentConversationsFilePath() {
+  return join(app.getPath('userData'), 'studio-agent-conversations.json');
+}
+
+function readAgentConversationsState() {
+  try {
+    const p = agentConversationsFilePath();
+    if (!existsSync(p)) {
+      return { ok: true, state: { activeId: null, conversations: [] } };
+    }
+    const raw = readFileSync(p, 'utf8');
+    const j = JSON.parse(raw);
+    if (!j || typeof j !== 'object' || !Array.isArray(j.conversations)) {
+      return { ok: true, state: { activeId: null, conversations: [] } };
+    }
+    return {
+      ok: true,
+      state: {
+        activeId: typeof j.activeId === 'string' ? j.activeId : null,
+        conversations: j.conversations.filter((c) => c && typeof c.id === 'string' && Array.isArray(c.messages)),
+      },
+    };
+  } catch (e) {
+    return { ok: false, error: String(e.message || e), state: { activeId: null, conversations: [] } };
+  }
+}
+
+function writeAgentConversationsState(state) {
+  const st = state && typeof state === 'object' ? state : {};
+  const conversations = Array.isArray(st.conversations) ? st.conversations : [];
+  const trimmed = conversations.slice(0, 80).map((c) => ({
+    id: String(c.id || ''),
+    title: String(c.title || '未命名对话').slice(0, 120),
+    updatedAt: Number(c.updatedAt) || Date.now(),
+    messages: Array.isArray(c.messages)
+      ? c.messages
+          .filter((m) => m && (m.role === 'user' || m.role === 'assistant'))
+          .slice(-40)
+          .map((m) => ({
+            role: m.role,
+            content: String(m.content ?? '').slice(0, MAX_AGENT_CHAT_MSG_CHARS),
+          }))
+      : [],
+  }));
+  const out = {
+    activeId: typeof st.activeId === 'string' ? st.activeId : null,
+    conversations: trimmed,
+  };
+  const p = agentConversationsFilePath();
+  mkdirSync(dirname(p), { recursive: true });
+  writeFileSync(p, JSON.stringify(out, null, 2), 'utf8');
+  return { ok: true };
+}
+
 function quitAppWithoutConfirm() {
   skipExitConfirmOnce = true;
   app.quit();
@@ -851,7 +923,7 @@ async function classifyNeedProjectWithDeepSeek(userText, cfg) {
   }
 }
 
-async function runAgentPipeline(userText) {
+async function runAgentPipeline(userText, conversationHistory = []) {
   const cfg = loadAgentConfig();
   const logs = [];
   const ut = String(userText || '');
@@ -871,6 +943,10 @@ async function runAgentPipeline(userText) {
     intent,
   };
   const system = buildAgentSystemPrompt(kbPayload, cfg);
+  const hist = buildDeepseekHistoryMessages(conversationHistory);
+  if (hist.length) {
+    logs.push(`[chat] 已注入 ${hist.length} 条历史消息（多轮微调模式）。`);
+  }
   logs.push(
     `[metrics] ${JSON.stringify({
       mode: 'simple',
@@ -901,7 +977,7 @@ async function runAgentPipeline(userText) {
 
     const raw = await deepseekChat(
       cfg,
-      [{ role: 'system', content: system }, { role: 'user', content: userContent }],
+      [{ role: 'system', content: system }, ...hist, { role: 'user', content: userContent }],
       { temperature: round > 0 ? 0.58 : 0.2 }
     );
     let extracted = extractPlantumlFromModelText(raw);
@@ -943,16 +1019,31 @@ async function runAgentPipeline(userText) {
 
 /**
  * 单一入口：无项目根 → 仅需求；有项目根 → 先由 DeepSeek 判别是否结合仓库（失败则规则回退）。
+ * 若存在多轮对话历史，则不再走「读仓库」路径，避免规划阶段与历史语义冲突。
  * @param {string} ignoreGlobsText
+ * @param {Array<{role:string,content:string}>} [conversationHistory]
  */
-async function runAgentPipelineAdaptive(userText, projectRootFromUi, ignoreGlobsText) {
+async function runAgentPipelineAdaptive(userText, projectRootFromUi, ignoreGlobsText, conversationHistory = []) {
   const ut = String(userText || '').trim();
   const cfg = loadAgentConfig();
+  const histArr = Array.isArray(conversationHistory) ? conversationHistory : [];
+  const histForModel = buildDeepseekHistoryMessages(histArr);
+  if (histForModel.length > 0) {
+    const r = await runAgentPipeline(ut, histArr);
+    return {
+      ...r,
+      logs: [
+        '[chat] 多轮对话：本轮不附带仓库全文（如需重新结合项目目录请先「新建对话」）。',
+        ...(r.logs || []),
+      ],
+    };
+  }
+
   const rootFromUi = String(projectRootFromUi || '').trim();
   const root = rootFromUi || String(cfg.lastProjectRoot || '').trim();
 
   if (!root) {
-    const r = await runAgentPipeline(ut);
+    const r = await runAgentPipeline(ut, []);
     return {
       ...r,
       logs: ['[routing] 未选择项目目录 → 仅按需求生成（不含仓库文件上下文）。', ...(r.logs || [])],
@@ -965,21 +1056,21 @@ async function runAgentPipelineAdaptive(userText, projectRootFromUi, ignoreGlobs
   const line = `[routing:${dec.from}] need_project=${dec.needProject} confidence=${Number(dec.confidence).toFixed(2)} ${dec.reasonZh || ''}`;
 
   if (!useProject) {
-    const r = await runAgentPipeline(ut);
+    const r = await runAgentPipeline(ut, []);
     return {
       ...r,
       logs: [line, ...(r.logs || [])],
     };
   }
 
-  const r = await runAgentPipelineWithProject(ut, root, ignoreGlobsText);
+  const r = await runAgentPipelineWithProject(ut, root, ignoreGlobsText, []);
   return {
     ...r,
     logs: [line, `[routing] 结合项目目录生成：${root}`, ...(r.logs || [])],
   };
 }
 
-async function runAgentPipelineWithProject(userText, projectRoot, ignoreGlobsText) {
+async function runAgentPipelineWithProject(userText, projectRoot, ignoreGlobsText, conversationHistory = []) {
   const root = String(projectRoot || '').trim();
   if (!root) return { ok: false, error: '未选择项目目录', logs: [] };
 
@@ -1101,6 +1192,10 @@ async function runAgentPipelineWithProject(userText, projectRoot, ignoreGlobsTex
     intent,
   };
   const system = buildAgentSystemPromptForProject(kbPayload, cfg);
+  const hist = buildDeepseekHistoryMessages(conversationHistory);
+  if (hist.length) {
+    logs.push(`[chat] 已注入 ${hist.length} 条历史消息（项目生成阶段）。`);
+  }
   logs.push(
     `[metrics] ${JSON.stringify({
       mode: 'project_render',
@@ -1131,7 +1226,7 @@ async function runAgentPipelineWithProject(userText, projectRoot, ignoreGlobsTex
 
     const raw = await deepseekChat(
       cfg,
-      [{ role: 'system', content: system }, { role: 'user', content: userContent }],
+      [{ role: 'system', content: system }, ...hist, { role: 'user', content: userContent }],
       { temperature: round > 0 ? 0.58 : 0.2 }
     );
     let extracted = extractPlantumlFromModelText(raw);
@@ -1639,7 +1734,8 @@ function registerIpcHandlers() {
           logs: [],
         };
       }
-      const r = await runAgentPipelineAdaptive(text, projectRoot, ignoreGlobsText);
+      const conversationHistory = Array.isArray(p.conversationHistory) ? p.conversationHistory : [];
+      const r = await runAgentPipelineAdaptive(text, projectRoot, ignoreGlobsText, conversationHistory);
       if (r.ok && !isProEdition()) {
         setAgentSessionLock(r.source);
         return {
@@ -1655,6 +1751,16 @@ function registerIpcHandlers() {
     } catch (e) {
       const msg = String(e.message || e);
       return { ok: false, error: msg, logs: [msg] };
+    }
+  });
+
+  ipcMain.handle('studio:agent-conversations-load', () => readAgentConversationsState());
+
+  ipcMain.handle('studio:agent-conversations-save', (_e, state) => {
+    try {
+      return writeAgentConversationsState(state);
+    } catch (e) {
+      return { ok: false, error: String(e.message || e) };
     }
   });
 
@@ -1723,9 +1829,10 @@ function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle('studio:agent-run-project', async (_e, { userText, projectRoot, ignoreGlobsText }) => {
+  ipcMain.handle('studio:agent-run-project', async (_e, payload) => {
     try {
-      const text = String(userText || '').trim();
+      const p = payload != null && typeof payload === 'object' ? payload : {};
+      const text = String(p.userText || '').trim();
       if (!text) return { ok: false, error: '请填写「自然语言需求」作为制图目标', logs: [] };
       if (text.length > AGENT_USER_TEXT_MAX_CHARS) {
         return {
@@ -1734,7 +1841,8 @@ function registerIpcHandlers() {
           logs: [],
         };
       }
-      const r = await runAgentPipelineWithProject(text, projectRoot, ignoreGlobsText);
+      const conversationHistory = Array.isArray(p.conversationHistory) ? p.conversationHistory : [];
+      const r = await runAgentPipelineWithProject(text, p.projectRoot, p.ignoreGlobsText, conversationHistory);
       if (r.ok && !isProEdition()) {
         setAgentSessionLock(r.source);
         return {
