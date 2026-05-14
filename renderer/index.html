@@ -24,7 +24,7 @@
         <div class="title-sub">
           <span class="project-label">项目目录驱动制图</span>
           <span class="project-badge">2.0 Beta</span>
-          <span class="project-path" id="project-root-display">未选择项目目录…</span>
+          <span class="project-path" id="project-root-display" title="">未选择项目目录…</span>
           <button type="button" id="btn-project-pick" class="project-pick-btn" title="选择项目文件夹">
             <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
               <path fill="currentColor" d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V6h5.17l1.41 1.41.59.59H20v10z"/>
@@ -86,7 +86,7 @@
             <p class="agent-nl-routing-hint">
               已选项目目录时，会先<strong>单独调用 DeepSeek</strong>判断本次需求是否应结合仓库读文件；不需要则仅按文字生成。模型不可用或 JSON 解析失败时，会<strong>回退本地关键词规则</strong>。未选目录则始终仅按需求生成。
               <span class="agent-nl-routing-hint__sub">
-                多轮微调：同一对话内后续请求会带上此前用户说明与模型输出的 PlantUML；此时不再附带仓库全文，如需重新读目录请先点「新建对话」。
+                多轮微调：后续请求会带上此前用户说明与模型输出的 PlantUML。若路由判定需要读仓库，每轮仍会重新规划与选文件。切换项目目录时会提示新建对话或恢复该目录下的历史会话。
               </span>
             </p>
             <div class="agent-nl-actions">
@@ -276,6 +276,24 @@
         <button type="button" id="project-imported-ok" class="primary">确定</button>
       </div>
     </dialog>
+    <dialog id="project-switch-dialog" class="app-dialog">
+      <div class="app-dialog-head">
+        <h3 class="app-dialog-title">项目目录已更改</h3>
+        <button type="button" id="project-switch-close" class="app-dialog-close">关闭</button>
+      </div>
+      <div id="project-switch-body" class="app-dialog-body">
+        <p id="project-switch-lead" class="app-dialog-hint-block"></p>
+        <div id="project-switch-match-wrap" class="project-switch-match-wrap hidden">
+          <label for="project-switch-conv-select" class="project-switch-label">该目录下的历史对话</label>
+          <select id="project-switch-conv-select" class="project-switch-select"></select>
+        </div>
+        <p id="project-switch-no-match" class="app-dialog-hint-block hidden"></p>
+      </div>
+      <div class="app-dialog-actions project-switch-actions">
+        <button type="button" id="project-switch-resume" class="primary hidden">使用所选会话</button>
+        <button type="button" id="project-switch-new" class="ghost">新建对话并绑定</button>
+      </div>
+    </dialog>
     <dialog id="pay-unlock-confirm-dialog" class="app-dialog">
       <div class="app-dialog-head">
         <h3 class="app-dialog-title">确认单次解锁付费</h3>
@@ -330,6 +348,18 @@
         </div>
       </div>
     </dialog>
+    <div id="studio-busy-overlay" class="studio-busy-overlay hidden" aria-hidden="true">
+      <div
+        class="studio-busy-card"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="studio-busy-message"
+      >
+        <div class="studio-busy-spinner" aria-hidden="true"></div>
+        <p id="studio-busy-message" class="studio-busy-message">正在处理…</p>
+      </div>
+    </div>
+    <div id="studio-toast" class="studio-toast hidden" role="status"></div>
     <script src="./mxgraph-editor.js"></script>
     <script src="./app.js" type="module"></script>
   </body>
