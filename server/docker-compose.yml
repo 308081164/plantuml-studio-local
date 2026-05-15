@@ -6,6 +6,7 @@ services:
     build: .
     image: plantuml-studio-pay-server:latest
     restart: unless-stopped
+    # 宿主机 8848 → 容器 8848。若宝塔/Nginx 已在宿主机占用 8848，请改为 "18848:8848" 并同步改反代上游端口。
     ports:
       - "8848:8848"
     env_file:

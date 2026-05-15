@@ -30,6 +30,8 @@ const ORDERS_FILE = join(DATA_DIR, 'orders.json');
 const RELEASE_FILE = join(DATA_DIR, 'latest-github-release.json');
 
 const PORT = Number(process.env.PORT || 8848);
+/** 监听网卡；默认 0.0.0.0 便于公网 IP:PORT 直连。若仅允许本机 Nginx 反代可设为 127.0.0.1 */
+const BIND_HOST = (process.env.STUDIO_BIND_HOST || '0.0.0.0').trim() || '0.0.0.0';
 const MOCK_PAY = process.env.MOCK_PAY === '1' || process.env.MOCK_PAY === 'true';
 const RELEASE_INJECT_TOKEN = process.env.STUDIO_RELEASE_INJECT_TOKEN || '';
 
@@ -471,6 +473,19 @@ app.post('/api/convert/plantuml-nl', async (req, res) => {
 });
 
 const PUBLIC_WEB_DIR = join(__dirname, 'public');
+const INDEX_HTML = join(PUBLIC_WEB_DIR, 'index.html');
+
+/** 根路径：在挂载 static 之前兜底，避免镜像缺 public 时整站无响应 */
+app.get('/', (_req, res, next) => {
+  if (existsSync(INDEX_HTML)) return next();
+  res.type('html').status(200).send(`<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"/><title>PlantUML Studio 服务</title></head>
+<body style="font-family:system-ui,sans-serif;padding:2rem;max-width:36rem;line-height:1.5;">
+<h1>服务已启动</h1>
+<p>未找到 <code>public/index.html</code>，静态营销页未部署。请确认镜像/目录中包含 <code>public</code> 后重建容器。</p>
+<p><a href="/api/health">健康检查</a>（JSON）</p>
+</body></html>`);
+});
+
 if (existsSync(PUBLIC_WEB_DIR)) {
   app.use(express.static(PUBLIC_WEB_DIR, { maxAge: '2h', index: 'index.html' }));
 }
@@ -478,6 +493,13 @@ if (existsSync(PUBLIC_WEB_DIR)) {
 loadOrders();
 ensureDataDir();
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`[studio-pay-server] listening on 0.0.0.0:${PORT} mockPay=${MOCK_PAY}`);
+process.on('unhandledRejection', (reason) => {
+  console.error('[studio-pay-server] unhandledRejection', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[studio-pay-server] uncaughtException', err);
+});
+
+app.listen(PORT, BIND_HOST, () => {
+  console.log(`[studio-pay-server] listening on ${BIND_HOST}:${PORT} mockPay=${MOCK_PAY}`);
 });
