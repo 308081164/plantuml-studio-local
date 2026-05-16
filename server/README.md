@@ -121,7 +121,8 @@ npm start
 6. **`curl … 000` 且 `Connection refused`、且 `ss` 无 8848**  
    表示**当前宿主机没有任何服务监听 8848**（容器未运行、映射失败或未部署）。请在本机目录 `~/plantuml-pay-server` 执行：  
    `docker compose ps -a` · `docker compose logs --tail=80 studio-pay-server`  
-   若提示 `docker: command not found`，需先安装并启动 Docker；若容器为 `Exited`，根据日志修正 `.env` 或镜像后再 `docker compose up -d --build`。
+   若提示 `docker: command not found`，需先安装并启动 Docker；若容器为 `Exited`，根据日志修正 `.env` 或镜像后再 `docker compose up -d --build`。  
+   若状态为 **`Restarting`** 且日志含 **`ERR_MODULE_NOT_FOUND`** / **`Cannot find package ... express`**：镜像内依赖未就绪或缓存异常，请 **`docker compose build --no-cache && docker compose up -d`**（或先同步含最新 `Dockerfile` 的 `server/` 再执行）。
 
 7. **服务器未安装 `git`**  
    不影响使用 **GitHub Actions 的 tar|ssh 部署**（流水线会把 `server/` 打包解压到该目录）。若你仍想在服务器上 `git pull`，可安装：`dnf install -y git`（AlmaLinux/RHEL 系）或按发行版使用 `yum`/`apt`。
