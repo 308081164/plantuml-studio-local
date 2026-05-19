@@ -472,6 +472,94 @@ app.post('/api/convert/plantuml-nl', async (req, res) => {
   }
 });
 
+/* ---------- 月度一次性密钥（登记 / 核销，JSON 持久化） ---------- */
+const MONTHLY_KEYS_FILE = join(DATA_DIR, 'monthly-keys.json');
+
+function loadMonthlyKeyStore() {
+  try {
+    if (!existsSync(MONTHLY_KEYS_FILE)) return { version: 1, keys: {} };
+    const o = JSON.parse(readFileSync(MONTHLY_KEYS_FILE, 'utf8'));
+    if (!o || typeof o !== 'object' || !o.keys || typeof o.keys !== 'object') return { version: 1, keys: {} };
+    return o;
+  } catch {
+    return { version: 1, keys: {} };
+  }
+}
+
+function saveMonthlyKeyStore(data) {
+  mkdirSync(dirname(MONTHLY_KEYS_FILE), { recursive: true });
+  writeFileSync(MONTHLY_KEYS_FILE, JSON.stringify(data, null, 2), 'utf8');
+}
+
+function addCalendarDaysYmd(days) {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + (Number(days) || 0));
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function adminMonthlyKeysAuth(req) {
+  const tok = String(process.env.MONTHLY_KEYS_ADMIN_TOKEN || '').trim();
+  const h = String(req.headers.authorization || '');
+  const m = /^Bearer\s+(\S+)/i.exec(h);
+  return Boolean(tok && m && m[1] === tok);
+}
+
+app.post('/api/admin/monthly-keys', (req, res) => {
+  if (!adminMonthlyKeysAuth(req)) {
+    res.status(401).json({ ok: false, error: '未授权：请携带正确的 Authorization: Bearer' });
+    return;
+  }
+  const key = String(req.body?.key || '').trim();
+  if (!key || key.length < 16) {
+    res.status(400).json({ ok: false, error: '密钥过短或为空' });
+    return;
+  }
+  const st = loadMonthlyKeyStore();
+  if (st.keys[key]) {
+    res.json({ ok: true, duplicate: true, message: '该密钥已登记' });
+    return;
+  }
+  st.keys[key] = {
+    status: 'registered',
+    created_at: new Date().toISOString(),
+    used_at: null,
+    used_hw_id: null,
+    valid_until: null,
+  };
+  saveMonthlyKeyStore(st);
+  res.json({ ok: true });
+});
+
+app.post('/api/license/redeem-monthly', (req, res) => {
+  const key = String(req.body?.key || '').trim();
+  const hw = String(req.body?.hw_id || '').trim().toLowerCase();
+  if (!key || !hw || hw.length < 16) {
+    res.status(400).json({ ok: false, error: '请提供密钥与有效 hw_id' });
+    return;
+  }
+  const st = loadMonthlyKeyStore();
+  const row = st.keys[key];
+  if (!row) {
+    res.json({ ok: false, error: '密钥无效或未在服务器登记' });
+    return;
+  }
+  if (row.status === 'used') {
+    res.json({ ok: false, error: '密钥已使用并已作废' });
+    return;
+  }
+  const validUntil = addCalendarDaysYmd(31);
+  row.status = 'used';
+  row.used_at = new Date().toISOString();
+  row.used_hw_id = hw;
+  row.valid_until = validUntil;
+  saveMonthlyKeyStore(st);
+  res.json({ ok: true, valid_until: validUntil });
+});
+
 const PUBLIC_WEB_DIR = join(__dirname, 'public');
 const INDEX_HTML = join(PUBLIC_WEB_DIR, 'index.html');
 

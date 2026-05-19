@@ -1092,6 +1092,7 @@ body.studio-agent-source-locked #source {
   font-size: 0.9rem;
   line-height: 1.45;
   color: var(--text);
+  white-space: pre-line;
 }
 
 .license-section-title {

@@ -76,6 +76,10 @@ npm start
 | POST | `/api/alipay/notify` | 支付宝异步通知（`application/x-www-form-urlencoded`） |
 | POST | `/internal/github-release` | CI 写入发布元数据，Header: `Authorization: Bearer <STUDIO_RELEASE_INJECT_TOKEN>` |
 | GET | `/api/public/latest-release` | 公开读取最近一次 CI 写入的发布信息 |
+| POST | `/api/admin/monthly-keys` | 登记月度密钥（Header: `Authorization: Bearer <MONTHLY_KEYS_ADMIN_TOKEN>`，body: `{ key }`） |
+| POST | `/api/license/redeem-monthly` | 客户端核销月度密钥（body: `{ key, hw_id }`，一次性） |
+
+密钥数据默认写入 `data/monthly-keys.json`（与订单数据同卷）。详见 `.env.example` 中的 `MONTHLY_KEYS_ADMIN_TOKEN`。
 
 ## 支付宝正式接入
 

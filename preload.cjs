@@ -89,6 +89,7 @@ contextBridge.exposeInMainWorld('studio', {
   licenseGetDeviceInfo: () => ipcRenderer.invoke('studio:license-get-device-info'),
   licenseGetStatus: () => ipcRenderer.invoke('studio:license-get-status'),
   licenseActivate: (licenseCode) => ipcRenderer.invoke('studio:license-activate', { licenseCode }),
+  licenseRedeemMonthly: (payload) => ipcRenderer.invoke('studio:license-redeem-monthly', payload || {}),
   licenseDeactivate: () => ipcRenderer.invoke('studio:license-deactivate'),
   agentLockGet: () => ipcRenderer.invoke('studio:agent-lock-get'),
   getEffectivePlantumlSource: (payload) => ipcRenderer.invoke('studio:get-effective-plantuml-source', payload),

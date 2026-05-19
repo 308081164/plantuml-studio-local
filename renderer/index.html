@@ -335,10 +335,40 @@
             <code id="license-device-code" class="license-device-value license-device-code"></code>
             <button type="button" id="btn-license-copy-device-code" class="ghost" title="复制激活设备码">复制</button>
           </div>
+          <p class="license-hint">
+            未激活时，每台电脑每个自然日可使用 <strong>12 次免费用量</strong>使用专业相关能力（成功执行的操作计次，次日自动重置）。正式激活或月度核销后不受该上限约束。
+          </p>
           <p class="license-hint">请将以上激活设备码提供给管理员，管理员将为您生成软件激活码。</p>
         </div>
         <div id="license-activate-area" class="license-activate-area hidden">
-          <div class="license-section-title">输入软件激活码</div>
+          <div class="license-section-title">月度解锁（一次性密钥 · 服务器核销）</div>
+          <p class="license-hint">
+            由「密钥生成器」生成并在服务器登记后，在此输入密钥；核销成功后本机获得约 31 天专业权益。每个密钥仅可使用一次。
+          </p>
+          <label class="license-device-label" for="license-monthly-server-url">服务器根 URL（可选，未设环境变量时必填）</label>
+          <input
+            type="url"
+            id="license-monthly-server-url"
+            class="license-code-input"
+            spellcheck="false"
+            placeholder="例如 https://pay.example.com:8850"
+            style="min-height: 2rem"
+          />
+          <label class="license-device-label" for="license-monthly-key-input">月度密钥</label>
+          <input
+            type="text"
+            id="license-monthly-key-input"
+            class="license-code-input"
+            spellcheck="false"
+            placeholder="粘贴从生成器复制的密钥"
+            style="min-height: 2rem"
+          />
+          <div class="license-activate-actions">
+            <button type="button" id="btn-license-redeem-monthly" class="primary">核销月度密钥</button>
+          </div>
+          <pre id="license-monthly-result" class="license-activate-result hidden"></pre>
+
+          <div class="license-section-title" style="margin-top: 1.25rem">输入软件激活码（永久 / 限时，逻辑不变）</div>
           <textarea id="license-code-input" class="license-code-input" rows="3" spellcheck="false" placeholder="请粘贴管理员提供的软件激活码…"></textarea>
           <div class="license-activate-actions">
             <button type="button" id="btn-license-activate" class="primary">激活</button>

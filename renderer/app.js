@@ -976,18 +976,21 @@ async function openStashAddDialog() {
   const dlg = $('stash-add-dialog');
   const nameInput = $('stash-add-name');
   const folderSelect = $('stash-add-folder');
-  
+
   nameInput.value = '';
   folderSelect.innerHTML = '<option value="">暂存区根目录</option>';
-  
+
   stashFolders.forEach(folder => {
     const option = document.createElement('option');
     option.value = folder.id;
     option.textContent = folder.name;
     folderSelect.appendChild(option);
   });
-  
+
   dlg.showModal();
+  requestAnimationFrame(() => {
+    nameInput.focus();
+  });
 }
 
 async function addCurrentToStashWithFolder() {
@@ -1310,6 +1313,27 @@ function enterEditMode() {
   }).catch(err => {
     console.error('Failed to init mxGraph:', err);
     setStatus('画板编辑器初始化失败: ' + err.message, false);
+    isInEditMode = false;
+    btn.textContent = '进入画板';
+    btn.classList.remove('active');
+    $('mx-graph-host')?.classList.add('hidden');
+    $('mx-graph-host')?.setAttribute('aria-hidden', 'true');
+    const svgWrap = $('preview-svg');
+    const imgEl = $('preview-img');
+    const ph = $('preview-placeholder');
+    if (svgWrap?.querySelector('svg')) {
+      svgWrap.classList.remove('hidden');
+      ph?.classList.add('hidden');
+      imgEl?.classList.add('hidden');
+    } else if (imgEl?.getAttribute('src')) {
+      imgEl.classList.remove('hidden');
+      ph?.classList.add('hidden');
+      svgWrap?.classList.add('hidden');
+    } else {
+      ph?.classList.remove('hidden');
+      svgWrap?.classList.add('hidden');
+      imgEl?.classList.add('hidden');
+    }
   });
 
   setStatus('已进入画板编辑模式，可拖拽调整元素位置', true);
@@ -1491,6 +1515,9 @@ async function createStashFolder() {
   const nameInput = $('stash-folder-name');
   nameInput.value = '';
   dlg.showModal();
+  requestAnimationFrame(() => {
+    nameInput.focus();
+  });
 }
 
 async function confirmCreateStashFolder() {
@@ -2187,25 +2214,49 @@ async function refreshLicenseStatus() {
 
   try {
     const status = await window.studio.licenseGetStatus();
+    const fr = typeof status.freeDailyRemaining === 'number' ? status.freeDailyRemaining : 0;
+    const fl = typeof status.freeDailyLimit === 'number' ? status.freeDailyLimit : 12;
+    const freeLine = `免费用量：今日剩余 ${fr}/${fl} 次（每日 0 点起按本机日期重置）`;
     if (status.activated) {
       icon.textContent = '✅';
       const mode = status.licenseMode === 'permanent' ? '永久授权' : '限时授权';
       const tier = status.payload?.tier || 'full';
-      text.textContent = `已激活 · 高级版（${mode}，等级: ${tier}）`;
+      let base = `已激活 · 高级版（${mode}，等级: ${tier}）`;
       if (status.payload?.valid_until) {
-        text.textContent += `，有效期至 ${status.payload.valid_until}`;
+        base += `，激活码有效期至 ${status.payload.valid_until}`;
       }
+      const bits = [base];
+      if (status.monthlyPassActive && status.monthlyValidUntil) {
+        bits.push(`月度权益至 ${status.monthlyValidUntil}`);
+      }
+      bits.push(freeLine);
+      text.textContent = bits.join(' · ');
       deviceArea.classList.add('hidden');
       activateArea.classList.remove('hidden');
       $('license-code-input').value = '';
       $('license-activate-result').classList.add('hidden');
+      $('license-monthly-result')?.classList.add('hidden');
     } else {
-      icon.textContent = '🔒';
-      const edition = status.edition === 'pro' ? '高级版（已激活）' : '免费版';
-      text.textContent = `${status.error || '未激活'}（当前：${edition}）`;
+      icon.textContent = status.monthlyPassActive ? '🎫' : '🔒';
+      const edition = status.edition === 'pro' ? '高级版' : '免费版';
+      const lines = [];
+      lines.push(`${status.error || '未通过软件激活码激活'}（当前：${edition}）`);
+      if (status.monthlyPassActive && status.monthlyValidUntil) {
+        lines.push(`月度权益至 ${status.monthlyValidUntil}`);
+      }
+      lines.push(freeLine);
+      text.textContent = lines.join('\n');
       deviceArea.classList.remove('hidden');
       activateArea.classList.remove('hidden');
       await refreshDeviceInfo();
+    }
+    const urlEl = $('license-monthly-server-url');
+    if (urlEl && !urlEl.value) {
+      try {
+        urlEl.value = localStorage.getItem('studio_monthly_server_url') || '';
+      } catch {
+        /* ignore */
+      }
     }
   } catch (e) {
     icon.textContent = '❌';
@@ -2227,6 +2278,45 @@ async function refreshDeviceInfo() {
   } catch (e) {
     $('license-hw-id').textContent = '异常';
     $('license-device-code').textContent = '异常';
+  }
+}
+
+async function handleLicenseRedeemMonthly() {
+  if (!window.studio?.licenseRedeemMonthly) return;
+  const key = ($('license-monthly-key-input')?.value || '').trim();
+  const serverBase = ($('license-monthly-server-url')?.value || '').trim();
+  const resultEl = $('license-monthly-result');
+  if (!resultEl) return;
+  if (!key) {
+    setStatus('请输入月度密钥', false);
+    return;
+  }
+  resultEl.classList.remove('hidden');
+  resultEl.textContent = '正在向服务器核销…';
+  resultEl.style.color = 'var(--muted)';
+  try {
+    if (serverBase) {
+      try {
+        localStorage.setItem('studio_monthly_server_url', serverBase);
+      } catch {
+        /* ignore */
+      }
+    }
+    const r = await window.studio.licenseRedeemMonthly({ key, serverBase });
+    if (r.ok) {
+      resultEl.textContent = `✅ 核销成功，权益至 ${r.valid_until}`;
+      resultEl.style.color = 'var(--ok)';
+      setStatus('月度密钥已核销', true);
+      await refreshLicenseStatus();
+    } else {
+      resultEl.textContent = `❌ ${r.error}`;
+      resultEl.style.color = 'var(--error)';
+      setStatus('月度密钥核销失败', false);
+    }
+  } catch (e) {
+    resultEl.textContent = `❌ ${e.message}`;
+    resultEl.style.color = 'var(--error)';
+    setStatus('月度密钥核销异常', false);
   }
 }
 
@@ -2305,6 +2395,8 @@ function wireLicenseDialog() {
   });
 
   $('btn-license-activate').addEventListener('click', () => handleLicenseActivate());
+
+  $('btn-license-redeem-monthly')?.addEventListener('click', () => void handleLicenseRedeemMonthly());
 
   $('btn-license-deactivate').addEventListener('click', () => handleLicenseDeactivate());
 

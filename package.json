@@ -31,6 +31,8 @@
       "scripts/app-menu.mjs",
       "scripts/license-common.mjs",
       "scripts/agent-session-lock.mjs",
+      "scripts/free-daily-quota.mjs",
+      "scripts/monthly-pass-local.mjs",
       "scripts/project-index.mjs",
       "scripts/project-context.mjs",
       "scripts/agent-intent.mjs",

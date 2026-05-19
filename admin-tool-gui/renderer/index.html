@@ -8,8 +8,8 @@
   </head>
   <body>
     <header class="top">
-      <h1>UML大师 · 激活码管理</h1>
-      <p class="sub">图形化签发 / 验证（私钥仅存本机，勿分发）</p>
+      <h1>PlantUML 密钥生成器</h1>
+      <p class="sub">激活码签发 · 月度密钥 · 设备码工具（私钥仅存本机）</p>
     </header>
 
     <nav class="tabs" role="tablist">
@@ -17,6 +17,7 @@
       <button type="button" class="tab" data-tab="gen">生成激活码</button>
       <button type="button" class="tab" data-tab="verify">验证激活码</button>
       <button type="button" class="tab" data-tab="device">设备码工具</button>
+      <button type="button" class="tab" data-tab="monthly">月度密钥</button>
     </nav>
 
     <main>
@@ -96,7 +97,26 @@
         <div class="row">
           <button type="button" id="btn-device-calc" class="primary">计算</button>
         </div>
-        <pre id="device-result" class="result hidden"></pre>
+      <section id="panel-monthly" class="panel">
+        <h2>月度一次性密钥</h2>
+        <p class="hint">生成随机密钥 → 在服务器登记 → 用户于客户端「授权激活」中核销。每个密钥仅核销一次。</p>
+        <div class="row">
+          <button type="button" id="btn-monthly-gen" class="primary">生成新密钥</button>
+          <button type="button" id="btn-monthly-copy" disabled>复制密钥</button>
+        </div>
+        <textarea id="monthly-key-out" class="mono" rows="2" readonly placeholder="点击「生成新密钥」"></textarea>
+
+        <h3 style="margin-top: 1.25rem">登记到服务器</h3>
+        <div class="grid">
+          <label>服务器根 URL <span class="req">*</span></label>
+          <input type="url" id="monthly-server-base" placeholder="https://your-host:8850" autocomplete="off" />
+          <label>管理员 Token <span class="req">*</span></label>
+          <input type="password" id="monthly-admin-token" placeholder="与 MONTHLY_KEYS_ADMIN_TOKEN 一致" autocomplete="off" />
+        </div>
+        <div class="row">
+          <button type="button" id="btn-monthly-register" class="primary">向服务器登记当前密钥</button>
+        </div>
+        <pre id="monthly-register-result" class="result hidden"></pre>
       </section>
     </main>
 

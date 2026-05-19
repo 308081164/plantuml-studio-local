@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "PlantUML 本地工作室：支付宝异步通知验签、订单与 GitHub Actions 发布元数据注入",
+  "description": "PlantUML 本地工作室：支付回调、自然语言转 PlantUML、月度密钥登记与核销",
   "main": "index.mjs",
   "scripts": {
     "start": "node index.mjs"

@@ -1,8 +1,8 @@
 {
-  "name": "uml-master-license-gui",
+  "name": "plantuml-license-keygen-gui",
   "version": "1.0.0",
   "private": true,
-  "description": "UML 大师 / PlantUML 本地工作室 — 激活码管理（图形界面）",
+  "description": "PlantUML 本地工作室 — 密钥生成器（激活码 + 月度密钥登记）",
   "type": "module",
   "main": "electron-main.mjs",
   "scripts": {
@@ -11,11 +11,12 @@
     "dist": "electron-builder --win --x64"
   },
   "build": {
-    "appId": "com.uml_master.license-admin-gui",
-    "productName": "UML大师激活码管理",
+    "appId": "com.uml_master.plantuml-license-keygen",
+    "productName": "PlantUML密钥生成器",
     "directories": {
       "output": "release"
     },
+    "artifactName": "PlantUML密钥生成器-${version}-portable.${ext}",
     "files": [
       "electron-main.mjs",
       "preload.cjs",

@@ -7,4 +7,6 @@ contextBridge.exposeInMainWorld('adminGui', {
   verifyLicense: (code) => ipcRenderer.invoke('admin:verify-license', { code }),
   deviceCodeFromHwFields: (fields) => ipcRenderer.invoke('admin:device-code', fields),
   saveLicenseToFile: (code) => ipcRenderer.invoke('admin:save-license-file', { code }),
+  generateMonthlyKey: () => ipcRenderer.invoke('admin:generate-monthly-key'),
+  registerMonthlyKey: (payload) => ipcRenderer.invoke('admin:register-monthly-key', payload || {}),
 });

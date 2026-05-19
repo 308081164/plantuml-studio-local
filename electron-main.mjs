@@ -36,6 +36,8 @@ import {
   shortHwId,
   resolveIssuerPublicKeyBuffer,
 } from './scripts/license-common.mjs';
+import { FREE_DAILY_LIMIT, getFreeQuotaRemaining, consumeOneFreeUse } from './scripts/free-daily-quota.mjs';
+import { isMonthlyPassActive, writeMonthlyPass, readMonthlyPass } from './scripts/monthly-pass-local.mjs';
 import {
   buildProjectSummary,
   CHARS_PER_TOKEN_EST,
@@ -1665,6 +1667,40 @@ function buildStashListPayload() {
 }
 
 function registerIpcHandlers() {
+  function getEntitlementSnapshot() {
+    const ctx = getLicenseVerificationContext();
+    if (!ctx) {
+      return { level: 'blocked', error: '内部错误：未配置发行方公钥，无法完成授权校验。', ctx: null };
+    }
+    const ud = app.getPath('userData');
+    const st = checkLicenseStatus(ud, ctx);
+    if (st.activated) return { level: 'license', ctx };
+    if (isMonthlyPassActive(ud)) return { level: 'monthly', ctx };
+    const rem = getFreeQuotaRemaining(ud);
+    if (rem > 0) return { level: 'free', remaining: rem, ctx };
+    return { level: 'none', remaining: 0, ctx };
+  }
+
+  function gateFromSnapshot(snap) {
+    if (snap.level === 'blocked') return { ok: false, error: snap.error };
+    if (snap.level !== 'none') return null;
+    return {
+      ok: false,
+      error: `今日免费用量已用完（${FREE_DAILY_LIMIT}/${FREE_DAILY_LIMIT}），请明日再试，或使用菜单「帮助 → 授权激活」完成激活 / 月度密钥。`,
+    };
+  }
+
+  function maybeConsumeFreeAfterSuccess(snap) {
+    if (!snap || snap.level !== 'free') return;
+    consumeOneFreeUse(app.getPath('userData'));
+  }
+
+  /** 本次请求是否应展示完整智能生成内容（正式激活 / 月度 / 当日免费用量） */
+  function shouldUnlockAgentContent(snap) {
+    if (!snap || snap.level === 'blocked') return false;
+    return snap.level === 'license' || snap.level === 'monthly' || snap.level === 'free';
+  }
+
   ipcMain.handle('studio:get-api-base', () => apiBase);
 
   ipcMain.handle('studio:clipboard-write-png', (_e, arrayBuffer) => {
@@ -1694,7 +1730,11 @@ function registerIpcHandlers() {
   ipcMain.handle('studio:agent-config-get', () => loadAgentConfig());
 
   ipcMain.handle('studio:agent-config-set', (_e, partial) => {
+    const snap = getEntitlementSnapshot();
+    const gate = gateFromSnapshot(snap);
+    if (gate) return { ok: false, error: gate.error };
     const next = saveAgentConfig(partial || {});
+    maybeConsumeFreeAfterSuccess(snap);
     return { ok: true, config: next };
   });
 
@@ -1721,6 +1761,9 @@ function registerIpcHandlers() {
 
   ipcMain.handle('studio:agent-run', async (_e, payload) => {
     try {
+      const snap = getEntitlementSnapshot();
+      const gate = gateFromSnapshot(snap);
+      if (gate) return { ...gate, logs: [gate.error] };
       const p = payload != null && typeof payload === 'object' ? payload : { userText: payload };
       const text = String(p.userText ?? '').trim();
       const projectRoot = p.projectRoot != null ? String(p.projectRoot).trim() : '';
@@ -1735,7 +1778,9 @@ function registerIpcHandlers() {
       }
       const conversationHistory = Array.isArray(p.conversationHistory) ? p.conversationHistory : [];
       const r = await runAgentPipelineAdaptive(text, projectRoot, ignoreGlobsText, conversationHistory);
-      if (r.ok && !isProEdition()) {
+      if (r?.ok) maybeConsumeFreeAfterSuccess(snap);
+      const unlock = shouldUnlockAgentContent(snap);
+      if (r.ok && !unlock) {
         setAgentSessionLock(r.source);
         return {
           ...r,
@@ -1743,7 +1788,7 @@ function registerIpcHandlers() {
           displaySource: buildLockedEditorPlaceholder(),
         };
       }
-      if (r.ok && isProEdition()) {
+      if (r.ok && unlock) {
         clearAgentSessionLock();
       }
       return { ...r, locked: false, displaySource: r.source };
@@ -1764,18 +1809,26 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle('studio:pick-project-directory', async () => {
+    const snap = getEntitlementSnapshot();
+    const gate = gateFromSnapshot(snap);
+    if (gate) return { ok: false, canceled: false, error: gate.error };
     const win = BrowserWindow.getFocusedWindow() || mainWindow;
     const r = await dialog.showOpenDialog(win || undefined, {
       properties: ['openDirectory'],
       title: '选择项目代码目录',
     });
     if (r.canceled || !r.filePaths?.length) return { ok: true, canceled: true };
+    maybeConsumeFreeAfterSuccess(snap);
     return { ok: true, path: r.filePaths[0] };
   });
 
   ipcMain.handle('studio:project-summary', async (_e, { rootPath }) => {
     try {
+      const snap = getEntitlementSnapshot();
+      const gate = gateFromSnapshot(snap);
+      if (gate) return gate;
       const { summary, stats } = buildProjectSummary(String(rootPath || '').trim());
+      maybeConsumeFreeAfterSuccess(snap);
       return { ok: true, summary, stats };
     } catch (e) {
       return { ok: false, error: String(e.message || e) };
@@ -1785,6 +1838,9 @@ function registerIpcHandlers() {
   /** 不调用 DeepSeek：按当前忽略规则 + 启发式选文件，粗算首轮将发送的 tokens */
   ipcMain.handle('studio:project-context-estimate', async (_e, { rootPath, userSample, ignoreGlobsText }) => {
     try {
+      const snap = getEntitlementSnapshot();
+      const gate = gateFromSnapshot(snap);
+      if (gate) return gate;
       const root = String(rootPath || '').trim();
       if (!root) return { ok: false, error: '未选择项目目录' };
       const cfg = loadAgentConfig();
@@ -1815,7 +1871,7 @@ function registerIpcHandlers() {
       });
       const full = assembleUserBlock(header, bundle.text, footer);
       const est = estimateTokens(full);
-      return {
+      const out = {
         ok: true,
         estimatedTokens: est,
         exceedsProductLimit: est > MAX_ASSEMBLED_USER_TOKENS,
@@ -1823,6 +1879,8 @@ function registerIpcHandlers() {
         bundleFileCount: bundle.usedPaths.length,
         skippedSecrets: manifest.stats.skippedSecrets,
       };
+      maybeConsumeFreeAfterSuccess(snap);
+      return out;
     } catch (e) {
       return { ok: false, error: String(e.message || e) };
     }
@@ -1830,6 +1888,9 @@ function registerIpcHandlers() {
 
   ipcMain.handle('studio:agent-run-project', async (_e, payload) => {
     try {
+      const snap = getEntitlementSnapshot();
+      const gate = gateFromSnapshot(snap);
+      if (gate) return { ...gate, logs: [gate.error] };
       const p = payload != null && typeof payload === 'object' ? payload : {};
       const text = String(p.userText || '').trim();
       if (!text) return { ok: false, error: '请填写「自然语言需求」作为制图目标', logs: [] };
@@ -1842,7 +1903,9 @@ function registerIpcHandlers() {
       }
       const conversationHistory = Array.isArray(p.conversationHistory) ? p.conversationHistory : [];
       const r = await runAgentPipelineWithProject(text, p.projectRoot, p.ignoreGlobsText, conversationHistory);
-      if (r.ok && !isProEdition()) {
+      if (r?.ok) maybeConsumeFreeAfterSuccess(snap);
+      const unlock = shouldUnlockAgentContent(snap);
+      if (r.ok && !unlock) {
         setAgentSessionLock(r.source);
         return {
           ...r,
@@ -1850,7 +1913,7 @@ function registerIpcHandlers() {
           displaySource: buildLockedEditorPlaceholder(),
         };
       }
-      if (r.ok && isProEdition()) {
+      if (r.ok && unlock) {
         clearAgentSessionLock();
       }
       return { ...r, locked: false, displaySource: r.source };
@@ -1895,10 +1958,20 @@ function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle('studio:stash-list', () => buildStashListPayload());
+  ipcMain.handle('studio:stash-list', () => {
+    const snap = getEntitlementSnapshot();
+    const gate = gateFromSnapshot(snap);
+    if (gate) return { ok: false, error: gate.error, items: [] };
+    const payload = buildStashListPayload();
+    maybeConsumeFreeAfterSuccess(snap);
+    return payload;
+  });
 
   ipcMain.handle('studio:stash-add', (_e, payload) => {
     try {
+      const snap = getEntitlementSnapshot();
+      const gate = gateFromSnapshot(snap);
+      if (gate) return gate;
       const lockGate = assertAgentLockBlocksFeature();
       if (lockGate) return lockGate;
       const kind = payload?.kind === 'svg' ? 'svg' : 'png';
@@ -1949,6 +2022,7 @@ function registerIpcHandlers() {
         hasPuml: Boolean(sourceText.length),
       });
       writeStashManifest(items);
+      maybeConsumeFreeAfterSuccess(snap);
       return { ok: true, id };
     } catch (e) {
       return { ok: false, error: String(e.message || e) };
@@ -1957,6 +2031,9 @@ function registerIpcHandlers() {
 
   ipcMain.handle('studio:stash-remove', (_e, { ids }) => {
     try {
+      const snap = getEntitlementSnapshot();
+      const gate = gateFromSnapshot(snap);
+      if (gate) return gate;
       const idSet = new Set((Array.isArray(ids) ? ids : []).map(String).filter(Boolean));
       if (!idSet.size) return { ok: false, error: '未选择条目' };
       const kept = readStashManifest().filter((m) => {
@@ -1967,6 +2044,7 @@ function registerIpcHandlers() {
         return true;
       });
       writeStashManifest(kept);
+      maybeConsumeFreeAfterSuccess(snap);
       return { ok: true, removed: idSet.size };
     } catch (e) {
       return { ok: false, error: String(e.message || e) };
@@ -1975,6 +2053,9 @@ function registerIpcHandlers() {
 
   ipcMain.handle('studio:stash-get-full', (_e, { id }) => {
     try {
+      const snap = getEntitlementSnapshot();
+      const gate = gateFromSnapshot(snap);
+      if (gate) return gate;
       const sid = String(id || '');
       if (!sid) return { ok: false, error: '缺少 id' };
       const items = readStashManifest();
@@ -1993,7 +2074,7 @@ function registerIpcHandlers() {
             sourceText = '';
           }
         }
-        return {
+        const out = {
           ok: true,
           kind: 'png',
           label: meta.label,
@@ -2001,6 +2082,8 @@ function registerIpcHandlers() {
           pngBase64: b.toString('base64'),
           sourceText,
         };
+        maybeConsumeFreeAfterSuccess(snap);
+        return out;
       }
       const sp = stashSvgPath(sid);
       if (!existsSync(sp)) return { ok: false, error: '文件缺失' };
@@ -2014,7 +2097,7 @@ function registerIpcHandlers() {
           sourceText = '';
         }
       }
-      return {
+      const out = {
         ok: true,
         kind: 'svg',
         label: meta.label,
@@ -2022,6 +2105,8 @@ function registerIpcHandlers() {
         svgText,
         sourceText,
       };
+      maybeConsumeFreeAfterSuccess(snap);
+      return out;
     } catch (e) {
       return { ok: false, error: String(e.message || e) };
     }
@@ -2029,6 +2114,9 @@ function registerIpcHandlers() {
 
   ipcMain.handle('studio:stash-copy', (_e, { id }) => {
     try {
+      const snap = getEntitlementSnapshot();
+      const gate = gateFromSnapshot(snap);
+      if (gate) return gate;
       const lockGate = assertAgentLockBlocksFeature();
       if (lockGate) return lockGate;
       const sid = String(id || '');
@@ -2042,12 +2130,14 @@ function registerIpcHandlers() {
         const img = nativeImage.createFromBuffer(buf);
         if (img.isEmpty()) return { ok: false, error: '无法解析 PNG' };
         clipboard.writeImage(img);
+        maybeConsumeFreeAfterSuccess(snap);
         return { ok: true, mode: 'png' };
       }
       const sp = stashSvgPath(sid);
       if (!existsSync(sp)) return { ok: false, error: '文件缺失' };
       const svgText = readFileSync(sp, 'utf8');
       clipboard.writeText(svgText);
+      maybeConsumeFreeAfterSuccess(snap);
       return { ok: true, mode: 'svg' };
     } catch (e) {
       return { ok: false, error: String(e.message || e) };
@@ -2100,13 +2190,6 @@ function registerIpcHandlers() {
     return { hwId, publicKey };
   }
 
-  function isProEdition() {
-    const ctx = getLicenseVerificationContext();
-    if (!ctx) return false;
-    const st = checkLicenseStatus(app.getPath('userData'), ctx);
-    return st.activated === true;
-  }
-
   function clearAgentSessionLock() {
     agentSessionLock = null;
   }
@@ -2125,7 +2208,7 @@ function registerIpcHandlers() {
     if (agentSessionLock?.active) {
       return {
         ok: false,
-        error: '免费版智能生成内容已锁定：预览复制、导出与加入暂存已禁用。请完成支付解锁或激活专业版。',
+        error: '免费版智能生成内容已锁定：预览复制、导出与加入暂存已禁用。请使用免费用量或激活专业版 / 月度密钥以解除锁定。',
       };
     }
     return null;
@@ -2157,12 +2240,68 @@ function registerIpcHandlers() {
     try {
       const ctx = getLicenseVerificationContext();
       const status = ctx ? checkLicenseStatus(app.getPath('userData'), ctx) : { activated: false, error: '未配置发行方公钥' };
+      const ud = app.getPath('userData');
+      const monthlyOn = isMonthlyPassActive(ud);
+      const mp = readMonthlyPass(ud);
+      const freeRem = getFreeQuotaRemaining(ud);
       const edition = status.activated ? 'pro' : 'free';
       const agentLock = agentSessionLock?.active
         ? { active: true, digest: agentSessionLock.digest }
         : { active: false, digest: '' };
       const payApiBase = resolvePayApiBase();
-      return { ok: true, ...status, edition, agentLock, payApiBase };
+      return {
+        ok: true,
+        ...status,
+        monthlyPassActive: monthlyOn,
+        monthlyValidUntil: monthlyOn && mp?.valid_until ? mp.valid_until : null,
+        freeDailyRemaining: freeRem,
+        freeDailyLimit: FREE_DAILY_LIMIT,
+        effectiveUnlocked: Boolean(status.activated || monthlyOn || freeRem > 0),
+        edition,
+        agentLock,
+        payApiBase,
+      };
+    } catch (e) {
+      return { ok: false, error: String(e.message || e) };
+    }
+  });
+
+  ipcMain.handle('studio:license-redeem-monthly', async (_e, { key, serverBase }) => {
+    try {
+      const rawKey = String(key || '').trim();
+      if (!rawKey) return { ok: false, error: '请输入月度密钥' };
+      const base = String(serverBase || process.env.STUDIO_MONTHLY_SERVER_URL || '')
+        .trim()
+        .replace(/\/$/, '');
+      if (!base) {
+        return {
+          ok: false,
+          error: '未配置月度密钥服务地址。请在环境变量 STUDIO_MONTHLY_SERVER_URL 中设置，或在对话框内填写服务器根 URL。',
+        };
+      }
+      const ctx = getLicenseVerificationContext();
+      if (!ctx?.hwId) return { ok: false, error: '无法获取本机设备指纹' };
+      const url = `${base}/api/license/redeem-monthly`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ key: rawKey, hw_id: ctx.hwId }),
+      });
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        return { ok: false, error: `服务器返回非 JSON（HTTP ${res.status}）` };
+      }
+      if (!res.ok || !data?.ok) {
+        return { ok: false, error: data?.error || `核销失败（HTTP ${res.status}）` };
+      }
+      const vu = String(data.valid_until || '').trim();
+      if (!vu) return { ok: false, error: '服务器未返回 valid_until' };
+      writeMonthlyPass(app.getPath('userData'), { valid_until: vu });
+      clearAgentSessionLock();
+      return { ok: true, valid_until: vu };
     } catch (e) {
       return { ok: false, error: String(e.message || e) };
     }
