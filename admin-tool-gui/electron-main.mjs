@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -48,7 +49,7 @@ function createWindow() {
     height: 820,
     minWidth: 720,
     minHeight: 640,
-    title: 'UML大师激活码管理',
+    title: 'PlantUML 密钥生成器',
     webPreferences: {
       preload: join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -114,7 +115,7 @@ app.whenReady().then(() => {
         homeDir: dir,
       },
       hint:
-        '请将上述公钥 Hex 写入 plantuml-desktop/scripts/license-common.mjs 中的 EMBEDDED_ISSUER_PUBLIC_KEY_HEX，与客户端内置公钥保持一致后再打包软件。',
+        '请将上述公钥 Hex 写入仓库 scripts/license-common.mjs 中的 EMBEDDED_ISSUER_PUBLIC_KEY_HEX，与客户端内置公钥保持一致后再打包软件。',
     };
   });
 
@@ -243,6 +244,47 @@ app.whenReady().then(() => {
     mkdirSync(dirname(filePath), { recursive: true });
     writeFileSync(filePath, `${text}\n`, 'utf8');
     return { ok: true, path: filePath };
+  });
+
+  ipcMain.handle('admin:generate-monthly-key', () => {
+    const key = `STM-${randomUUID().toString().replace(/-/g, '')}`;
+    return { ok: true, key };
+  });
+
+  ipcMain.handle('admin:register-monthly-key', async (_e, payload) => {
+    const serverBase = String(payload?.serverBase || '')
+      .trim()
+      .replace(/\/$/, '');
+    const adminToken = String(payload?.adminToken || '').trim();
+    const key = String(payload?.key || '').trim();
+    if (!serverBase) return { ok: false, error: '请填写服务器根 URL' };
+    if (!adminToken) return { ok: false, error: '请填写管理员 Token' };
+    if (!key) return { ok: false, error: '请先生成密钥' };
+    const url = `${serverBase}/api/admin/monthly-keys`;
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Authorization: `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({ key }),
+      });
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        return { ok: false, error: `服务器返回非 JSON（HTTP ${res.status}）` };
+      }
+      if (!res.ok || !data?.ok) {
+        return { ok: false, error: data?.error || `登记失败（HTTP ${res.status}）` };
+      }
+      return { ok: true, duplicate: Boolean(data.duplicate) };
+    } catch (e) {
+      return { ok: false, error: String(e.message || e) };
+    }
   });
 
   createWindow();

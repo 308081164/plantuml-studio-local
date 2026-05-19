@@ -191,6 +191,52 @@ $('btn-device-calc').addEventListener('click', async () => {
   ].join('\n');
 });
 
+let lastMonthlyKey = '';
+
+$('btn-monthly-gen')?.addEventListener('click', async () => {
+  const out = $('monthly-key-out');
+  const pre = $('monthly-register-result');
+  pre.classList.add('hidden');
+  if (!window.adminGui) return;
+  const r = await window.adminGui.generateMonthlyKey();
+  if (!r.ok) {
+    pre.textContent = r.error || '生成失败';
+    pre.classList.remove('hidden');
+    return;
+  }
+  lastMonthlyKey = r.key;
+  out.value = r.key;
+  $('btn-monthly-copy').disabled = !lastMonthlyKey;
+});
+
+$('btn-monthly-copy')?.addEventListener('click', async () => {
+  if (!lastMonthlyKey) return;
+  try {
+    await navigator.clipboard.writeText(lastMonthlyKey);
+    $('monthly-register-result').classList.add('hidden');
+  } catch {
+    const pre = $('monthly-register-result');
+    pre.textContent = '复制失败，请手动复制';
+    pre.classList.remove('hidden');
+  }
+});
+
+$('btn-monthly-register')?.addEventListener('click', async () => {
+  const pre = $('monthly-register-result');
+  pre.classList.remove('hidden');
+  if (!window.adminGui) return;
+  const r = await window.adminGui.registerMonthlyKey({
+    serverBase: $('monthly-server-base').value.trim(),
+    adminToken: $('monthly-admin-token').value.trim(),
+    key: lastMonthlyKey || $('monthly-key-out').value.trim(),
+  });
+  if (!r.ok) {
+    pre.textContent = `❌ ${r.error}`;
+    return;
+  }
+  pre.textContent = r.duplicate ? '✅ 服务器已有该密钥（重复登记已忽略）' : '✅ 登记成功';
+});
+
 setIssuedAtDefault();
 syncLicenseModeUi();
 void refreshKeyStatus();

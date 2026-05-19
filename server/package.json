@@ -1,0 +1,14 @@
+{
+  "name": "plantuml-studio-monthly-keys-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "月度一次性密钥登记与核销（JSON 持久化，可换 SQLite）",
+  "main": "index.mjs",
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

@@ -66,6 +66,17 @@ jobs:
       - name: Build Windows installers
         run: npx electron-builder --win --x64
 
+      - name: Build license key generator (portable)
+        shell: bash
+        run: |
+          set -e
+          cd admin-tool-gui
+          npm ci
+          npx electron-builder --win --x64 portable
+          cd ..
+          mkdir -p releases
+          cp admin-tool-gui/release/*.exe releases/
+
       - name: Upload to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
