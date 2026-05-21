@@ -6,10 +6,42 @@ import { randomUUID } from 'node:crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const licenseCommonDev = join(__dirname, '..', 'scripts', 'license-common.mjs');
-const licenseCommonBundled = join(__dirname, 'license-common.mjs');
-const licenseCommonPath = existsSync(licenseCommonBundled) ? licenseCommonBundled : licenseCommonDev;
-// Windows：`import()` 不能直接接受「C:\...」磁盘路径，须转为 file:// URL
+/**
+ * 打包后脚本在 app.asar 内，`import()` 无法可靠加载同级 ESM；
+ * package.json build.asarUnpack 将 license-common.mjs 解包到 app.asar.unpacked/。
+ */
+function resolveLicenseCommonPath() {
+  const tries = [];
+
+  try {
+    if (typeof app?.getAppPath === 'function') {
+      const ap = app.getAppPath();
+      if (typeof ap === 'string' && ap.length) {
+        tries.push(join(dirname(ap), 'app.asar.unpacked', 'license-common.mjs'));
+      }
+    }
+  } catch {
+    /* app 初始化极早或未就绪：忽略 */
+  }
+
+  const res = typeof process.resourcesPath === 'string' ? process.resourcesPath : '';
+  if (res) {
+    tries.push(join(res, 'app.asar.unpacked', 'license-common.mjs'));
+  }
+
+  tries.push(join(__dirname, 'license-common.mjs'));
+  tries.push(join(__dirname, '..', 'scripts', 'license-common.mjs'));
+
+  const found = tries.find((p) => typeof p === 'string' && p.length && existsSync(p));
+  if (!found) {
+    throw new Error(
+      `license-common.mjs 未找到。已试过：${tries.filter(Boolean).join(' | ') || '(无候选路径)'}（__dirname=${__dirname})`
+    );
+  }
+  return found;
+}
+
+const licenseCommonPath = resolveLicenseCommonPath();
 const licenseMod = await import(pathToFileURL(licenseCommonPath).href);
 const {
   generateKeyPair,

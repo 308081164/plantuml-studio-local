@@ -16,6 +16,9 @@
     "directories": {
       "output": "release"
     },
+    "asarUnpack": [
+      "**/license-common.mjs"
+    ],
     "artifactName": "PlantUML密钥生成器-${version}-portable.${ext}",
     "files": [
       "electron-main.mjs",
