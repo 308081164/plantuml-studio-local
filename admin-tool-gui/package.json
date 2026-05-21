@@ -8,7 +8,8 @@
   "scripts": {
     "start": "electron .",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder --win portable --x64"
+    "predist": "node ../scripts/sync-keygen-license.mjs",
+    "dist": "npm run predist && electron-builder --win portable --x64"
   },
   "build": {
     "appId": "com.uml_master.plantuml-license-keygen",
@@ -23,11 +24,8 @@
     "files": [
       "electron-main.mjs",
       "preload.cjs",
-      "renderer/**/*",
-      {
-        "from": "../scripts/license-common.mjs",
-        "to": "license-common.mjs"
-      }
+      "license-common.mjs",
+      "renderer/**/*"
     ],
     "win": {
       "target": [

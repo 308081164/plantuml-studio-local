@@ -14,7 +14,8 @@
     "dist": "npm run prepare:jre && npm run prepare:plantuml && electron-builder --win --x64",
     "dist:beta": "npm run prepare:jre && npm run prepare:plantuml && electron-builder --win --x64",
     "dist:portable": "npm run prepare:jre && npm run prepare:plantuml && electron-builder --win --x64 portable",
-    "dist:nsis": "npm run prepare:jre && npm run prepare:plantuml && electron-builder --win --x64 nsis"
+    "dist:nsis": "npm run prepare:jre && npm run prepare:plantuml && electron-builder --win --x64 nsis",
+    "sync:keygen-license": "node scripts/sync-keygen-license.mjs"
   },
   "build": {
     "appId": "com.uml_master.plantuml-studio",
