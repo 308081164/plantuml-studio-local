@@ -4,11 +4,14 @@ FROM node:20-bookworm-slim
 
 WORKDIR /app
 
+# Node 20 镜像自带的 npm 在部分 Docker/CI 环境下会打出「Exit handler never called」并以 0 退出，
+# 实际 node_modules 不完整（express 缺失）。先升级到 npm 10 最新补丁再安装依赖。
+RUN npm install -g npm@10.9.2 && npm --version
+
 COPY package.json package-lock.json ./
-# 单独一层完成 npm，避免与后续 node 在同一 shell 内串联时触发 npm「Exit handler never called」竞态
-RUN npm ci --omit=dev --no-audit --no-fund
-# 用 require 自检（与运行时 CJS 解析一致）；勿用 import('express') — Node ESM 易误走 legacyMainResolve 指向 index.js
-RUN node -e "require('express'); require('alipay-sdk'); require('plantuml-encoder'); console.log('deps ok')"
+RUN npm ci --omit=dev --no-audit --no-fund \
+  && test -f node_modules/express/package.json \
+  && node -e "require('express'); require('alipay-sdk'); require('plantuml-encoder'); console.log('deps ok')"
 
 COPY index.mjs online-deepseek.mjs load-env.mjs ./
 COPY public ./public
