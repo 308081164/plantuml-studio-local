@@ -5,8 +5,10 @@ FROM node:20-bookworm-slim
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev \
-  && node --input-type=module -e "import('express').then(()=>process.exit(0)).catch((e)=>{console.error(e);process.exit(1)})"
+# 单独一层完成 npm，避免与后续 node 在同一 shell 内串联时触发 npm「Exit handler never called」竞态
+RUN npm ci --omit=dev --no-audit --no-fund
+# 用 require 自检（与运行时 CJS 解析一致）；勿用 import('express') — Node ESM 易误走 legacyMainResolve 指向 index.js
+RUN node -e "require('express'); require('alipay-sdk'); require('plantuml-encoder'); console.log('deps ok')"
 
 COPY index.mjs online-deepseek.mjs load-env.mjs ./
 COPY public ./public
