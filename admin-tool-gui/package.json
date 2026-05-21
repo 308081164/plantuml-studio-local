@@ -8,7 +8,7 @@
   "scripts": {
     "start": "electron .",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder --win --x64"
+    "dist": "electron-builder --win portable --x64"
   },
   "build": {
     "appId": "com.uml_master.plantuml-license-keygen",

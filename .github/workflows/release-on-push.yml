@@ -84,7 +84,8 @@ jobs:
           set -e
           cd admin-tool-gui
           npm ci
-          npx electron-builder --win --x64 portable
+          # portable 必须紧跟 --win，写成「--win --x64 portable」会把 portable 当成非法全局参数
+          npx electron-builder --win portable --x64
           cd ..
           mkdir -p releases
           cp admin-tool-gui/release/*.exe releases/
