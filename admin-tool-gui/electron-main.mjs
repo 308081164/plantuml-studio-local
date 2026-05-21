@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 
@@ -9,7 +9,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const licenseCommonDev = join(__dirname, '..', 'scripts', 'license-common.mjs');
 const licenseCommonBundled = join(__dirname, 'license-common.mjs');
 const licenseCommonPath = existsSync(licenseCommonBundled) ? licenseCommonBundled : licenseCommonDev;
-const licenseMod = await import(licenseCommonPath);
+// Windows：`import()` 不能直接接受「C:\...」磁盘路径，须转为 file:// URL
+const licenseMod = await import(pathToFileURL(licenseCommonPath).href);
 const {
   generateKeyPair,
   generateHwId,
