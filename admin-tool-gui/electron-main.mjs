@@ -7,38 +7,16 @@ import { randomUUID } from 'node:crypto';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /**
- * 打包后脚本在 app.asar 内，`import()` 无法可靠加载同级 ESM；
- * package.json build.asarUnpack 将 license-common.mjs 解包到 app.asar.unpacked/。
+ * 密钥生成器启用 build.asar=false：应用源码以普通磁盘目录分发（解压后通常为 resources/app/），不生成 app.asar。
+ * dynamic import() 在 Windows 上仍须传入 file:// URL。
  */
 function resolveLicenseCommonPath() {
-  const tries = [];
-
-  try {
-    if (typeof app?.getAppPath === 'function') {
-      const ap = app.getAppPath();
-      if (typeof ap === 'string' && ap.length) {
-        tries.push(join(dirname(ap), 'app.asar.unpacked', 'license-common.mjs'));
-      }
-    }
-  } catch {
-    /* app 初始化极早或未就绪：忽略 */
-  }
-
-  const res = typeof process.resourcesPath === 'string' ? process.resourcesPath : '';
-  if (res) {
-    tries.push(join(res, 'app.asar.unpacked', 'license-common.mjs'));
-  }
-
-  tries.push(join(__dirname, 'license-common.mjs'));
-  tries.push(join(__dirname, '..', 'scripts', 'license-common.mjs'));
-
-  const found = tries.find((p) => typeof p === 'string' && p.length && existsSync(p));
-  if (!found) {
-    throw new Error(
-      `license-common.mjs 未找到。已试过：${tries.filter(Boolean).join(' | ') || '(无候选路径)'}（__dirname=${__dirname})`
-    );
-  }
-  return found;
+  const here = dirname(fileURLToPath(import.meta.url));
+  const bundled = join(here, 'license-common.mjs');
+  const dev = join(here, '..', 'scripts', 'license-common.mjs');
+  if (existsSync(bundled)) return bundled;
+  if (existsSync(dev)) return dev;
+  throw new Error(`license-common.mjs 未找到（__dirname=${here}）。请重新打包或执行 npm run sync:keygen-license 后再构建。`);
 }
 
 const licenseCommonPath = resolveLicenseCommonPath();
