@@ -13,13 +13,19 @@
   <body>
     <header class="topbar">
       <div class="title-area">
-        <div class="title-row">
+        <div class="title-row title-row--badges">
           <h1>PlantUML 本地工作室</h1>
           <span
             id="edition-badge"
             class="edition-badge edition-badge--free"
             title="当前为免费版；激活高级版后全功能长期可用"
             >免费版</span>
+          <span
+            id="free-quota-pill"
+            class="free-quota-pill hidden"
+            role="status"
+            title="当日成功触发免费用量的操作后递减；午夜起按本机日期重置。"
+            ></span>
         </div>
         <div class="title-sub">
           <span class="project-label">项目目录驱动制图</span>
@@ -294,6 +300,25 @@
         <button type="button" id="project-switch-new" class="ghost">新建对话并绑定</button>
       </div>
     </dialog>
+    <dialog id="china-univ-confirm-dialog" class="app-dialog app-dialog--wide">
+      <div class="app-dialog-head">
+        <h3 class="app-dialog-title">国内高校模式说明</h3>
+        <button type="button" id="china-univ-confirm-close" class="app-dialog-close" aria-label="关闭">关闭</button>
+      </div>
+      <div class="app-dialog-body">
+        <p>该模式主要面向 ER 图（陈氏表示法）与流程图 / 活动图做了专门优化。</p>
+        <p>
+          开启后可能会自动改写 <code>@startuml</code> 等相关源码，容易导致时序图、组件图、类图等其他类型渲染失败或异常。
+        </p>
+        <p>若出现渲染失败，请先关闭本模式后再试。</p>
+        <p><strong>确定要开启吗？</strong></p>
+      </div>
+      <div class="app-dialog-actions">
+        <button type="button" id="china-univ-confirm-cancel" class="ghost">取消</button>
+        <button type="button" id="china-univ-confirm-accept" class="primary">确定开启</button>
+      </div>
+    </dialog>
+
     <dialog id="pay-unlock-confirm-dialog" class="app-dialog">
       <div class="app-dialog-head">
         <h3 class="app-dialog-title">确认单次解锁付费</h3>

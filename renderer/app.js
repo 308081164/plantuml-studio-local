@@ -117,6 +117,14 @@ let stashFolders = [];
 /** 单次支付确认弹窗 Promise 收尾（由 wirePayUnlockConfirmDialog 注册） */
 let payUnlockConfirmResolver = null;
 
+/** 国内高校模式开启确认（避免 Electron 原生 confirm 夺走焦点导致输入框无法再键入） */
+let chinaUnivConfirmResolver = null;
+/** @type {boolean} */
+let chinaUnivConfirmChoice = false;
+
+/** 免费版主页免费用量轻量定时刷新（避免仅打开授权页时才看到计数变化） */
+let freeQuotaPollTimerId = null;
+
 /** SVG 编辑器实例 */
 let svgEditor = null;
 
@@ -504,6 +512,75 @@ function openPayUnlockConfirmDialog() {
   if (!dlg || typeof dlg.showModal !== 'function') return Promise.resolve(false);
   return new Promise((resolve) => {
     payUnlockConfirmResolver = resolve;
+    dlg.showModal();
+  });
+}
+
+/** 原生 window.confirm / 异步 IPC 后主进程焦点未回到 Renderer 时，Agent 文本框会失去键盘输入；双 rAF + 主进程收回焦点可避免此现象 */
+async function restoreAgentNlFocus() {
+  await new Promise((r) => requestAnimationFrame(r));
+  await new Promise((r) => requestAnimationFrame(r));
+  try {
+    if (typeof window.studio?.focusMainRenderer === 'function') {
+      await window.studio.focusMainRenderer();
+    }
+  } catch {
+    /* ignore */
+  }
+  const wrap = $('agent-nl-wrap');
+  const ta = $('agent-request');
+  const panelOpen = wrap && !wrap.classList.contains('hidden');
+  if (panelOpen && ta) {
+    try {
+      ta.focus({ preventScroll: true });
+    } catch {
+      ta.focus();
+    }
+  } else {
+    try {
+      $('china-univ-mode')?.focus({ preventScroll: true });
+    } catch {
+      $('china-univ-mode')?.focus();
+    }
+  }
+}
+
+function wireChinaUnivConfirmDialog() {
+  const dlg = $('china-univ-confirm-dialog');
+  if (!dlg || dlg.dataset.wired === '1') return;
+  dlg.dataset.wired = '1';
+  dlg.addEventListener('click', (ev) => {
+    if (ev.target === dlg) {
+      chinaUnivConfirmChoice = false;
+      dlg.close();
+    }
+  });
+  dlg.addEventListener('close', () => {
+    const fn = chinaUnivConfirmResolver;
+    chinaUnivConfirmResolver = null;
+    fn?.(chinaUnivConfirmChoice);
+    chinaUnivConfirmChoice = false;
+  });
+  $('china-univ-confirm-accept')?.addEventListener('click', () => {
+    chinaUnivConfirmChoice = true;
+    dlg.close();
+  });
+  $('china-univ-confirm-cancel')?.addEventListener('click', () => {
+    chinaUnivConfirmChoice = false;
+    dlg.close();
+  });
+  $('china-univ-confirm-close')?.addEventListener('click', () => {
+    chinaUnivConfirmChoice = false;
+    dlg.close();
+  });
+}
+
+function openChinaUnivConfirmDialog() {
+  const dlg = $('china-univ-confirm-dialog');
+  if (!dlg || typeof dlg.showModal !== 'function') return Promise.resolve(false);
+  return new Promise((resolve) => {
+    chinaUnivConfirmChoice = false;
+    chinaUnivConfirmResolver = resolve;
     dlg.showModal();
   });
 }
@@ -1648,29 +1725,24 @@ async function saveAgentForm() {
   }
 }
 
-function onChinaUnivModeToggle() {
+async function onChinaUnivModeToggle() {
   const cb = $('china-univ-mode');
   if (!cb) return;
   const next = cb.checked;
 
-  if (next) {
-    const ok = window.confirm(
-      '【国内高校模式说明】\n\n' +
-        '该模式主要面向 ER 图（陈氏表示法）与流程图 / 活动图做了专门优化。\n' +
-        '开启后可能会自动改写 @startuml 等相关源码，容易导致时序图、组件图、类图等其他类型渲染失败或异常。\n\n' +
-        '若出现渲染失败，请先关闭本模式后再试。\n\n' +
-        '确定要开启吗？'
-    );
-    if (!ok) {
-      cb.checked = false;
-      return;
+  try {
+    if (next) {
+      const ok = await openChinaUnivConfirmDialog();
+      if (!ok) {
+        cb.checked = false;
+        return;
+      }
     }
-  }
 
-  if (window.studio?.setAgentConfig) {
-    window.studio.setAgentConfig({ chinaUnivMode: next }).then((r) => {
+    if (window.studio?.setAgentConfig) {
+      const r = await window.studio.setAgentConfig({ chinaUnivMode: next });
       if (r && r.ok === false) {
-        $('china-univ-mode').checked = !next;
+        cb.checked = !next;
         setStatus(r.error || '未授权：无法保存国内高校模式开关。', false);
         return;
       }
@@ -1679,46 +1751,53 @@ function onChinaUnivModeToggle() {
         $('source').value = CHINA_UNIV_DEFAULT_SOURCE;
       }
       setStatus(isChinaUnivMode ? '国内高校模式已开启' : '国内高校模式已关闭', true);
-      void syncAgentLockFromMain();
-    });
-    return;
+      await syncAgentLockFromMain();
+    } else {
+      isChinaUnivMode = next;
+      if (isChinaUnivMode && $('source').value === DEFAULT_SOURCE) {
+        $('source').value = CHINA_UNIV_DEFAULT_SOURCE;
+      }
+      setStatus(isChinaUnivMode ? '国内高校模式已开启' : '国内高校模式已关闭', true);
+      await syncAgentLockFromMain();
+    }
+  } finally {
+    await restoreAgentNlFocus();
+    void refreshEditionUi();
   }
-  isChinaUnivMode = next;
-  if (isChinaUnivMode && $('source').value === DEFAULT_SOURCE) {
-    $('source').value = CHINA_UNIV_DEFAULT_SOURCE;
-  }
-  setStatus(isChinaUnivMode ? '国内高校模式已开启' : '国内高校模式已关闭', true);
-  void syncAgentLockFromMain();
 }
 
 async function applyAgentRunResult(r) {
-  const logText = (r.logs || []).join('\n');
-  recordSessionExecutionLog([logText, r.error && !r.ok ? `错误: ${r.error}` : ''].filter(Boolean).join('\n'));
-  const display = r.displaySource != null ? r.displaySource : r.source;
-  if (display) $('source').value = display;
-  const isArchDraft = Boolean(display && /^@studio-arch\b/i.test(String(display).trim()));
-  if (r.locked) {
-    document.body.classList.add('studio-agent-source-locked');
-    $('source').readOnly = true;
-    setPreviewLockOverlay(true);
-    updatePayUnlockButtonsVisible(true);
-  } else {
-    document.body.classList.remove('studio-agent-source-locked');
-    $('source').readOnly = false;
-    setPreviewLockOverlay(false);
-    updatePayUnlockButtonsVisible(false);
-  }
-  if (r.ok) {
-    setStatus(isArchDraft ? '静态架构草稿已填入，正在渲染预览…' : '智能生成成功，正在刷新预览…', true);
-    await render();
-  } else {
-    setStatus(r.error || '智能生成未通过校验', false);
-    showErrors(
-      [r.error || '未通过 PlantUML 校验', '已将最后一次模型输出填入编辑器，可手动修改后再渲染。'],
-      null
-    );
-    reportErrorArchive('agent-run', r.error || '智能生成未通过 PlantUML 校验', logText);
-    await render();
+  try {
+    const logText = (r.logs || []).join('\n');
+    recordSessionExecutionLog([logText, r.error && !r.ok ? `错误: ${r.error}` : ''].filter(Boolean).join('\n'));
+    const display = r.displaySource != null ? r.displaySource : r.source;
+    if (display) $('source').value = display;
+    const isArchDraft = Boolean(display && /^@studio-arch\b/i.test(String(display).trim()));
+    if (r.locked) {
+      document.body.classList.add('studio-agent-source-locked');
+      $('source').readOnly = true;
+      setPreviewLockOverlay(true);
+      updatePayUnlockButtonsVisible(true);
+    } else {
+      document.body.classList.remove('studio-agent-source-locked');
+      $('source').readOnly = false;
+      setPreviewLockOverlay(false);
+      updatePayUnlockButtonsVisible(false);
+    }
+    if (r.ok) {
+      setStatus(isArchDraft ? '静态架构草稿已填入，正在渲染预览…' : '智能生成成功，正在刷新预览…', true);
+      await render();
+    } else {
+      setStatus(r.error || '智能生成未通过校验', false);
+      showErrors(
+        [r.error || '未通过 PlantUML 校验', '已将最后一次模型输出填入编辑器，可手动修改后再渲染。'],
+        null
+      );
+      reportErrorArchive('agent-run', r.error || '智能生成未通过 PlantUML 校验', logText);
+      await render();
+    }
+  } finally {
+    void refreshEditionUi();
   }
 }
 
@@ -1778,6 +1857,7 @@ async function runAgent() {
     reportErrorArchive('agent-exception', msg);
   } finally {
     endStudioBusy();
+    void refreshEditionUi();
   }
 }
 
@@ -1798,78 +1878,82 @@ function closeAgentAdvancedDialog() {
 }
 
 async function pickProjectDirectory() {
-  if (!window.studio?.pickProjectDirectory) return;
-  const r = await window.studio.pickProjectDirectory();
-  if (r.canceled) return;
-  if (!r?.ok) {
-    const err = r?.error || '无法选择项目目录';
-    setStatus(err, false);
-    showToast(err, 'error');
-    return;
-  }
-  if (!r.path) return;
-  const picked = String(r.path).trim();
-  const nextN = normalizeProjectRoot(picked);
-  const prevN = normalizeProjectRoot(selectedProjectRoot);
+  try {
+    if (!window.studio?.pickProjectDirectory) return;
+    const r = await window.studio.pickProjectDirectory();
+    if (r.canceled) return;
+    if (!r?.ok) {
+      const err = r?.error || '无法选择项目目录';
+      setStatus(err, false);
+      showToast(err, 'error');
+      return;
+    }
+    if (!r.path) return;
+    const picked = String(r.path).trim();
+    const nextN = normalizeProjectRoot(picked);
+    const prevN = normalizeProjectRoot(selectedProjectRoot);
 
-  if (nextN === prevN) {
-    showToast('项目目录未变化', 'info');
-    return;
-  }
+    if (nextN === prevN) {
+      showToast('项目目录未变化', 'info');
+      return;
+    }
 
-  const matches = agentConversationsState.conversations
-    .filter((c) => normalizeProjectRoot(c.projectRoot) === nextN)
-    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    const matches = agentConversationsState.conversations
+      .filter((c) => normalizeProjectRoot(c.projectRoot) === nextN)
+      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
-  const active = getActiveAgentConversation();
-  const activeN = normalizeProjectRoot(active?.projectRoot || '');
-  const activeHasMessages = Boolean(active?.messages?.length);
-  const needsSwitchPrompt =
-    activeHasMessages || (activeN && activeN !== nextN) || (prevN && prevN !== nextN);
+    const active = getActiveAgentConversation();
+    const activeN = normalizeProjectRoot(active?.projectRoot || '');
+    const activeHasMessages = Boolean(active?.messages?.length);
+    const needsSwitchPrompt =
+      activeHasMessages || (activeN && activeN !== nextN) || (prevN && prevN !== nextN);
 
-  const applyPickedToConfig = async () => {
-    selectedProjectRoot = picked;
-    syncProjectRootDisplay(picked);
-    if (window.studio.setAgentConfig) {
-      const sr = await window.studio.setAgentConfig({ lastProjectRoot: picked });
-      if (sr && sr.ok === false) {
-        setStatus(sr.error || '已选目录，但未授权无法保存到配置。', false);
-        showToast(sr.error || '未授权：目录未保存到配置', 'error');
+    const applyPickedToConfig = async () => {
+      selectedProjectRoot = picked;
+      syncProjectRootDisplay(picked);
+      if (window.studio.setAgentConfig) {
+        const sr = await window.studio.setAgentConfig({ lastProjectRoot: picked });
+        if (sr && sr.ok === false) {
+          setStatus(sr.error || '已选目录，但未授权无法保存到配置。', false);
+          showToast(sr.error || '未授权：目录未保存到配置', 'error');
+        }
       }
-    }
-  };
+    };
 
-  if (!needsSwitchPrompt) {
+    if (!needsSwitchPrompt) {
+      await applyPickedToConfig();
+      if (active) {
+        active.projectRoot = picked;
+        await persistAgentConversations();
+      }
+      openProjectImportedDialog(picked);
+      showToast('已绑定项目目录到当前对话', 'success');
+      return;
+    }
+
+    const choice = await openProjectSwitchDialog({
+      pickedPath: picked,
+      previousLabel: String(selectedProjectRoot || '').trim() || '(未选择)',
+      matches,
+    });
     await applyPickedToConfig();
-    if (active) {
-      active.projectRoot = picked;
+
+    if (choice.kind === 'resume' && choice.conversationId) {
+      agentConversationsState.activeId = choice.conversationId;
+      const ta = $('agent-request');
+      if (ta) ta.value = '';
+      syncAgentRequestCounter();
+      renderAgentChatSelectUi();
       await persistAgentConversations();
+      showToast('已切换到该目录的历史对话', 'success');
+      return;
     }
-    openProjectImportedDialog(picked);
-    showToast('已绑定项目目录到当前对话', 'success');
-    return;
+
+    await createNewAgentConversation();
+    showToast('已新建对话并绑定到新项目目录', 'success');
+  } finally {
+    void refreshEditionUi();
   }
-
-  const choice = await openProjectSwitchDialog({
-    pickedPath: picked,
-    previousLabel: String(selectedProjectRoot || '').trim() || '(未选择)',
-    matches,
-  });
-  await applyPickedToConfig();
-
-  if (choice.kind === 'resume' && choice.conversationId) {
-    agentConversationsState.activeId = choice.conversationId;
-    const ta = $('agent-request');
-    if (ta) ta.value = '';
-    syncAgentRequestCounter();
-    renderAgentChatSelectUi();
-    await persistAgentConversations();
-    showToast('已切换到该目录的历史对话', 'success');
-    return;
-  }
-
-  await createNewAgentConversation();
-  showToast('已新建对话并绑定到新项目目录', 'success');
 }
 
 async function estimateProjectContext() {
@@ -1909,6 +1993,7 @@ async function estimateProjectContext() {
     reportErrorArchive('estimate-exception', msg);
   } finally {
     endStudioBusy();
+    void refreshEditionUi();
   }
 }
 
@@ -1947,6 +2032,7 @@ async function runAgentArchDraft() {
     reportErrorArchive('agent-arch-draft-exception', msg);
   } finally {
     endStudioBusy();
+    void refreshEditionUi();
   }
 }
 
@@ -1975,6 +2061,7 @@ async function openErrorLogDialog() {
 }
 
 function wireAppDialogs() {
+  wireChinaUnivConfirmDialog();
   const closeByBackdrop = (id) => {
     const d = $(id);
     if (!d) return;
@@ -2057,7 +2144,7 @@ async function syncAgentLockFromMain() {
 
 function init() {
   wirePayUnlockConfirmDialog();
-  $('china-univ-mode')?.addEventListener('change', () => onChinaUnivModeToggle());
+  $('china-univ-mode')?.addEventListener('change', () => void onChinaUnivModeToggle());
   
   $('source').value = DEFAULT_SOURCE;
   $('btn-render').addEventListener('click', () => render());
@@ -2176,6 +2263,10 @@ function init() {
 
   wireLicenseDialog();
 
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') void refreshEditionUi();
+  });
+
   getBase()
     .then((b) => setStatus(`已连接 ${b}`, true))
     .catch((e) => setStatus(String(e.message || e), false))
@@ -2186,20 +2277,51 @@ function init() {
  * 授权激活对话框逻辑
  * ============================================================ */
 
+function ensureFreeQuotaPollOnFreeEdition() {
+  if (freeQuotaPollTimerId != null) return;
+  freeQuotaPollTimerId = window.setInterval(() => {
+    if (!document.body.classList.contains('studio-edition-free')) return;
+    if (document.body.classList.contains('studio-monthly-active')) return;
+    if (document.visibilityState !== 'visible') return;
+    void refreshEditionUi();
+  }, 50000);
+}
+
 async function refreshEditionUi() {
   const badge = $('edition-badge');
+  const quotaPill = $('free-quota-pill');
   if (!badge || !window.studio?.licenseGetStatus) return;
   try {
     const s = await window.studio.licenseGetStatus();
     const pro = s.edition === 'pro';
+    const monthlyOn = Boolean(s.monthlyPassActive);
     badge.textContent = pro ? '高级版' : '免费版';
     badge.title = pro
       ? '高级版：已激活，全部功能可长期使用'
-      : '免费版：智能生成内容可能需按次解锁；可通过「帮助 → 授权激活」购买高级版';
+      : monthlyOn
+        ? '当前享有月度专业权益；日免费用量上限不适用'
+        : '免费版：智能生成等内容受每日免费用量与条款约束；详见顶栏计数或「帮助 → 授权激活」';
     badge.classList.toggle('edition-badge--pro', pro);
     badge.classList.toggle('edition-badge--free', !pro);
     document.body.classList.toggle('studio-edition-pro', pro);
     document.body.classList.toggle('studio-edition-free', !pro);
+    document.body.classList.toggle('studio-monthly-active', monthlyOn && !pro);
+
+    if (quotaPill) {
+      const showQuota = !pro && !monthlyOn;
+      quotaPill.classList.toggle('hidden', !showQuota);
+      if (showQuota) {
+        const fl = typeof s.freeDailyLimit === 'number' ? s.freeDailyLimit : 12;
+        const fr = typeof s.freeDailyRemaining === 'number' ? s.freeDailyRemaining : 0;
+        quotaPill.innerHTML = `今日剩余 <code>${fr}</code>／${fl} 次`;
+        quotaPill.title = `当日免费用量剩余 ${fr}/${fl} 次；午夜起按本机日期重置（成功触发需配额的能力后递减）。`;
+        quotaPill.classList.remove('free-quota-pill--warn', 'free-quota-pill--empty');
+        if (fr <= 0) quotaPill.classList.add('free-quota-pill--empty');
+        else if (fr <= Math.max(1, Math.ceil(fl / 3))) quotaPill.classList.add('free-quota-pill--warn');
+      }
+    }
+
+    ensureFreeQuotaPollOnFreeEdition();
   } catch {
     /* ignore */
   }
@@ -2261,6 +2383,8 @@ async function refreshLicenseStatus() {
   } catch (e) {
     icon.textContent = '❌';
     text.textContent = `检查授权状态失败: ${e.message}`;
+  } finally {
+    void refreshEditionUi();
   }
 }
 
@@ -2340,7 +2464,6 @@ async function handleLicenseActivate() {
       resultEl.style.color = 'var(--ok)';
       setStatus('授权激活成功', true);
       await refreshLicenseStatus();
-      await refreshEditionUi();
       await syncAgentLockFromMain();
     } else {
       resultEl.textContent = `❌ 激活失败: ${r.error}`;
@@ -2363,7 +2486,6 @@ async function handleLicenseDeactivate() {
     if (r.ok) {
       setStatus('已卸载激活', true);
       await refreshLicenseStatus();
-      await refreshEditionUi();
       await syncAgentLockFromMain();
     } else {
       setStatus(`卸载失败: ${r.error}`, false);
@@ -2402,7 +2524,6 @@ function wireLicenseDialog() {
 
   window.openLicenseDialog = async () => {
     await refreshLicenseStatus();
-    await refreshEditionUi();
     if (typeof dlg.showModal === 'function') dlg.showModal();
   };
 

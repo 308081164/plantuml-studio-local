@@ -74,6 +74,38 @@ body {
   border-color: #7eb0e8;
 }
 
+/** 免费版顶栏：今日免费用量实况 */
+.free-quota-pill {
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  padding: 0.22rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid #b8cadb;
+  background: linear-gradient(180deg, #f3f8fd 0%, #e7f0fb 100%);
+  color: #0b3d71;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.free-quota-pill.free-quota-pill--warn {
+  border-color: #e0a020;
+  background: linear-gradient(180deg, #fff9ea 0%, #ffe6a8 100%);
+  color: #5c3d00;
+}
+
+.free-quota-pill.free-quota-pill--empty {
+  border-color: #ee8a91;
+  background: linear-gradient(180deg, #fff2f2 0%, #ffdce0 100%);
+  color: #82071e;
+}
+
+.free-quota-pill code {
+  font-size: inherit;
+  font-weight: 800;
+}
+
 body.studio-edition-free .topbar {
   border-bottom: 2px solid rgba(224, 176, 96, 0.55);
 }

@@ -1703,6 +1703,21 @@ function registerIpcHandlers() {
 
   ipcMain.handle('studio:get-api-base', () => apiBase);
 
+  /** 原生对话框或在部分环境下切换 UI 后主窗口未收回键盘焦点时，调用以恢复 Renderer 输入 */
+  ipcMain.handle('studio:focus-main-renderer', () => {
+    try {
+      const win = BrowserWindow.getFocusedWindow() || mainWindow;
+      if (!win?.isDestroyed()) {
+        win.show();
+        win.focus();
+        win.webContents.focus();
+      }
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String(e.message || e) };
+    }
+  });
+
   ipcMain.handle('studio:clipboard-write-png', (_e, arrayBuffer) => {
     try {
       const lockGate = assertAgentLockBlocksFeature();
@@ -1734,7 +1749,6 @@ function registerIpcHandlers() {
     const gate = gateFromSnapshot(snap);
     if (gate) return { ok: false, error: gate.error };
     const next = saveAgentConfig(partial || {});
-    maybeConsumeFreeAfterSuccess(snap);
     return { ok: true, config: next };
   });
 
