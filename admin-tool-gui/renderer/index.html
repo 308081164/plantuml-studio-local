@@ -9,7 +9,7 @@
   <body>
     <header class="top">
       <h1>PlantUML 密钥生成器</h1>
-      <p class="sub">激活码签发 · 月度密钥 · 设备码工具（私钥仅存本机）</p>
+      <p class="sub">激活码签发 · 月度密钥 · 设备码工具（可内置私钥或本机密钥文件）</p>
     </header>
 
     <nav class="tabs" role="tablist">
@@ -23,7 +23,11 @@
     <main>
       <section id="panel-keys" class="panel panel--active">
         <h2>Ed25519 密钥对</h2>
-        <p class="hint">与客户端 <code>license-common.mjs</code> 内置公钥须一致；私钥勿提交 Git。</p>
+        <p class="hint">
+          公钥以本程序随附的 <code>license-common.mjs</code> 中 <code>EMBEDDED_ISSUER_PUBLIC_KEY_HEX</code> 为准（与客户端一致）。私钥可写在
+          <code>issuer-embedded-keys.mjs</code>（或本地 <code>issuer-embedded-keys.local.mjs</code>，勿提交版本库）的
+          <code>EMBEDDED_ISSUER_PRIVATE_PKCS8_HEX</code>（PKCS#8 DER 十六进制），无需依赖用户目录下的 <code>.der</code> 文件。
+        </p>
         <div id="key-status" class="status-box">正在读取密钥状态…</div>
         <label class="check"><input type="checkbox" id="init-overwrite" /> 覆盖已有密钥（危险）</label>
         <div class="row">

@@ -40,6 +40,9 @@ admin-tool/.issuer-private.der
 admin-tool/.issuer-public.der
 admin-tool/embedded-public-hex.txt
 
+# 密钥生成工具：本地内置私钥覆盖（切勿提交）
+admin-tool-gui/issuer-embedded-keys.local.mjs
+
 # 激活码管理 GUI 子工程
 admin-tool-gui/node_modules/
 admin-tool-gui/release/

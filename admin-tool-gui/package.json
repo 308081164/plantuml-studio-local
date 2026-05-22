@@ -22,6 +22,7 @@
     "files": [
       "electron-main.mjs",
       "preload.cjs",
+      "issuer-embedded-keys.mjs",
       "license-common.mjs",
       "renderer/**/*"
     ],

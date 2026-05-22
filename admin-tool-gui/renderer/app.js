@@ -47,11 +47,22 @@ async function refreshKeyStatus() {
     box.textContent = '读取失败';
     return;
   }
+  const srcLabel =
+    s.publicHexSource === 'file'
+      ? '磁盘公钥文件'
+      : s.publicHexSource === 'built_in_license_common'
+        ? '内置（license-common）'
+        : '无';
+
   box.textContent = [
-    `私钥: ${s.hasPrivate ? '已找到' : '未找到'}`,
-    `  → ${s.privatePath}`,
-    `公钥: ${s.hasPublic ? '已找到' : '未找到'}`,
-    `  → ${s.publicPath}`,
+    `有效私钥来源: ${s.privateEffective === 'embedded' ? '内置 hex' : s.privateEffective === 'file' ? '磁盘文件' : '未配置'}`,
+    s.privateEffective === 'embedded'
+      ? `内置私钥 Hex 前缀: ${s.embeddedPrivateHexPreview || '（不可用）'}`
+      : '',
+    s.issuerLocalOverlayPresent ? `已加载 issuer-embedded-keys.local.mjs 覆盖` : '',
+    `磁盘私钥路径: ${s.privatePath} → ${s.hasPrivateFile ? '已找到文件' : '无文件'}`,
+    `磁盘公钥路径: ${s.publicPath} → ${s.hasPublicFile ? '已找到文件' : '无文件'}`,
+    `当前展示用公钥 Hex 来源: ${srcLabel}`,
     s.publicHexPreview ? `公钥 Hex 前缀: ${s.publicHexPreview}` : '',
   ]
     .filter(Boolean)

@@ -2,7 +2,8 @@ import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { createPrivateKey, randomUUID } from 'node:crypto';
+import * as embeddedIssuerBase from './issuer-embedded-keys.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -22,6 +23,7 @@ function resolveLicenseCommonPath() {
 const licenseCommonPath = resolveLicenseCommonPath();
 const licenseMod = await import(pathToFileURL(licenseCommonPath).href);
 const {
+  EMBEDDED_ISSUER_PUBLIC_KEY_HEX,
   generateKeyPair,
   generateHwId,
   generateDeviceCode,
@@ -32,6 +34,54 @@ const {
   verifyLicenseSignature,
   resolveIssuerPublicKeyBuffer,
 } = licenseMod;
+
+const issuerLocalModulePath = join(__dirname, 'issuer-embedded-keys.local.mjs');
+/** @type {Record<string, unknown>} */
+let embeddedIssuerLocal = {};
+if (existsSync(issuerLocalModulePath)) {
+  embeddedIssuerLocal = await import(pathToFileURL(issuerLocalModulePath).href);
+}
+
+function mergedEmbeddedPrivatePkcs8Hex() {
+  const fromLocal =
+    embeddedIssuerLocal && typeof embeddedIssuerLocal.EMBEDDED_ISSUER_PRIVATE_PKCS8_HEX === 'string'
+      ? embeddedIssuerLocal.EMBEDDED_ISSUER_PRIVATE_PKCS8_HEX.trim()
+      : '';
+  if (fromLocal) return fromLocal;
+  return String(embeddedIssuerBase.EMBEDDED_ISSUER_PRIVATE_PKCS8_HEX || '').trim();
+}
+
+/** @returns {Buffer|null} 有效 PKCS#8 DER，否则 null */
+function embeddedPrivateKeyDerBuffer() {
+  const hex = mergedEmbeddedPrivatePkcs8Hex();
+  if (!hex) return null;
+  let buf;
+  try {
+    buf = Buffer.from(hex, 'hex');
+  } catch {
+    return null;
+  }
+  if (!buf.length) return null;
+  try {
+    createPrivateKey({ key: buf, format: 'der', type: 'pkcs8' });
+    return buf;
+  } catch {
+    return null;
+  }
+}
+
+/** 签名用：优先内置私钥，否则磁盘文件 */
+function resolvePrivateKeyBufferForSigning() {
+  const emb = embeddedPrivateKeyDerBuffer();
+  if (emb) return emb;
+  const p = privateKeyPath();
+  if (!existsSync(p)) return null;
+  try {
+    return readFileSync(p);
+  } catch {
+    return null;
+  }
+}
 
 function adminDataDir() {
   const home = process.env.USERPROFILE || process.env.HOME || __dirname;
@@ -74,28 +124,61 @@ app.whenReady().then(() => {
   ipcMain.handle('admin:get-key-status', () => {
     const priv = privateKeyPath();
     const pub = publicKeyPath();
-    const hasPrivate = existsSync(priv);
-    const hasPublic = existsSync(pub);
+    const hasPrivateFile = existsSync(priv);
+    const hasPublicFile = existsSync(pub);
+    const hasEmbeddedPrivate = Boolean(embeddedPrivateKeyDerBuffer());
+    const builtinPublicHex = String(EMBEDDED_ISSUER_PUBLIC_KEY_HEX || '').trim();
+
     let publicHex = '';
-    if (hasPublic) {
+    if (hasPublicFile) {
       try {
         publicHex = readFileSync(pub).toString('hex');
       } catch {
         /* ignore */
       }
     }
+    const publicHexSource =
+      publicHex ? 'file' : builtinPublicHex ? 'built_in_license_common' : 'none';
+    if (!publicHex && builtinPublicHex) {
+      publicHex = builtinPublicHex;
+    }
+
+    const privateEffective = hasEmbeddedPrivate ? 'embedded' : hasPrivateFile ? 'file' : 'none';
+    const embeddedPrivateHexPreview =
+      hasEmbeddedPrivate && mergedEmbeddedPrivatePkcs8Hex()
+        ? `${mergedEmbeddedPrivatePkcs8Hex().slice(0, 24)}…`
+        : '';
+
     return {
       ok: true,
-      hasPrivate,
-      hasPublic,
+      /** @deprecated 使用 hasPrivateFile — 兼容旧前端 */
+      hasPrivate: hasPrivateFile || hasEmbeddedPrivate,
+      /** @deprecated 使用 hasPublicFile — 磁盘公钥是否存在 */
+      hasPublic: hasPublicFile,
+      hasPrivateFile,
+      hasPublicFile,
+      hasEmbeddedPrivate,
+      hasBuiltinPublicHex: Boolean(builtinPublicHex),
+      publicHexSource,
+      privateEffective,
       privatePath: priv,
       publicPath: pub,
       publicHex,
       publicHexPreview: publicHex ? `${publicHex.slice(0, 32)}…` : '',
+      embeddedPrivateHexPreview,
+      issuerLocalOverlayPresent: existsSync(issuerLocalModulePath),
     };
   });
 
   ipcMain.handle('admin:init-keys', (_e, { overwrite }) => {
+    if (embeddedPrivateKeyDerBuffer()) {
+      return {
+        ok: false,
+        error:
+          '已配置内置私钥（issuer-embedded-keys.mjs 或 issuer-embedded-keys.local.mjs），签发将优先使用内置私钥。若需改用「生成新密钥对」写入磁盘的密钥，请先清空上述文件中的 EMBEDDED_ISSUER_PRIVATE_PKCS8_HEX。',
+      };
+    }
+
     const dir = adminDataDir();
     mkdirSync(dir, { recursive: true });
     const repoDir = repoAdminToolDir();
@@ -132,11 +215,14 @@ app.whenReady().then(() => {
 
   ipcMain.handle('admin:generate-license', (_e, params) => {
     try {
-      const p = privateKeyPath();
-      if (!existsSync(p)) {
-        return { ok: false, error: '未找到私钥。请先在「密钥」页生成密钥对，或将 .issuer-private.der 放到 admin-tool 目录。' };
+      const privateKey = resolvePrivateKeyBufferForSigning();
+      if (!privateKey?.length) {
+        return {
+          ok: false,
+          error:
+            '未找到有效私钥。请在 issuer-embedded-keys.mjs（或本地的 issuer-embedded-keys.local.mjs）中填入 PKCS#8 私钥 DER 十六进制，或在「密钥」页生成密钥对 / 放置 .issuer-private.der。',
+        };
       }
-      const privateKey = readFileSync(p);
 
       const deviceCode = String(params?.deviceCode || '').trim();
       const hwId = String(params?.hwId || '').trim().toLowerCase();
