@@ -9,7 +9,7 @@
 - **不需要**另行安装 Java、Python、Node.js；
 - **不需要**安装 Electron 或任何运行时（Node 与 Chromium 已随 Electron 便携包打进该 exe）。
 
-双击运行即可。**管理员私钥**仅保存在当前电脑（参见工具内提示），请勿把私钥或完整目录上传到不可信位置。
+双击运行即可。**本仓库为学习交流**：演示用的发行方密钥对已写入源码与 `admin-tool/`，公私钥一致；若在不可信环境中分发请先自行轮换密钥。
 
 便携版会向用户临时目录解压程序文件（常见行为）。若企业杀软拦截，请在安全策略中为该 exe 放行，或联系运维白名单。
 
@@ -34,9 +34,9 @@ npm run sync:keygen-license
 
 签发激活码时可**不依赖** `admin-tool/.issuer-private.der` 或用户目录下的 `ed25519-private.der`：
 
-1. **`issuer-embedded-keys.mjs`**：填入 `EMBEDDED_ISSUER_PRIVATE_PKCS8_HEX`（**PKCS#8 DER 十六进制**，与「生成密钥对」写出的私钥 `.der` 文件内容一致，仅在源码中以 hex 表示）。
-2. **推荐本地覆盖**：复制 `issuer-embedded-keys.local.example.mjs` 为 **`issuer-embedded-keys.local.mjs`**（已在仓库 `.gitignore` 中忽略），在同一导出名字中填入私钥 hex；运行时 **`.local` 优先于默认文件**。内部分发的便携包可在打包前将该文件放进本目录再打 `npm run dist`。
+1. **`issuer-embedded-keys.mjs`**：已将演示私钥填入 `EMBEDDED_ISSUER_PRIVATE_PKCS8_HEX`（**PKCS#8 DER 十六进制**），与客户端 `scripts/license-common.mjs` 中 `EMBEDDED_ISSUER_PUBLIC_KEY_HEX` 同一密钥对。
+2. **可选本地覆盖**：复制 `issuer-embedded-keys.local.example.mjs` 为 **`issuer-embedded-keys.local.mjs`**（已在仓库 `.gitignore` 中忽略），可在同一导出名中填入轮换后的私钥；运行时 **`.local` 优先于默认模块**。
 
 内置公钥以随附 **`license-common.mjs` → `EMBEDDED_ISSUER_PUBLIC_KEY_HEX`** 为准（与桌面客户端保持一致）。若配置了有效内置私钥，「密钥」页的「生成新密钥对」将被禁用，避免误以为已切换签名密钥却仍使用内置逻辑。
 
-**安全说明**：只要把**真实私钥**写进应用目录或源码，任何拿到该解压目录或源码副本的人都可能离线伪造激活码。公开仓库默认**不**提交有意义的私钥 hex；仅限受控环境下的管理员分发与内部构建使用。
+**安全说明**：本仓库按学习目的直接提交演示私钥，任何人可伪造仅供练习的激活码；若用于真实产品，请更换密钥对并勿再公开私钥。

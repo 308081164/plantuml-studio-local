@@ -7,7 +7,8 @@
  * - 方案 B（对称 HMAC）用于激活设备码生成与校验
  * - Ed25519 签名用于软件激活码
  *
- * 注意：本模块不包含管理员私钥（SK_issuer）；客户端内置发行方公钥（可经 UML_MASTER_PUBKEY 覆盖）。
+ * 管理员私钥由 admin-tool GUI（issuer-embedded-keys.mjs）或 admin-cli 使用的 .der 文件持有；客户端仅内置公钥。
+ * 本项目为学习交流，仓库内附有演示用密钥材料；请勿在生产环境直接使用。
  */
 
 import {
@@ -44,11 +45,12 @@ const LICENSE_FILE_NAME = 'studio-license.json';
 
 /**
  * 内置发行方 Ed25519 公钥（SPKI DER 十六进制）。
- * 与 `admin-tool/.issuer-private.der` 成对；私钥不入库，见 admin-tool 目录说明。
+ * 与 admin-tool-gui/issuer-embedded-keys.mjs 内 PKCS#8 私钥及管理员工具密钥页生成逻辑成对；
+ * admin-tool/.issuer-public.der 若存在则与该 hex 等价（二进制副本）。
  * 开发环境可通过环境变量 UML_MASTER_PUBKEY（hex）覆盖以使用独立密钥对。
  */
 export const EMBEDDED_ISSUER_PUBLIC_KEY_HEX =
-  '302a300506032b65700321000504e8b0895a18b541891b093991f116d759b992a2f0357bc891dacc619aefe3';
+  '302a300506032b6570032100e19d8387fb633fea6daa82940df99a6a6fa31a2c413729869c384e8f97a232b9';
 
 /**
  * 解析用于激活码验签的公钥 Buffer（SPKI DER）。

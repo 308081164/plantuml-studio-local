@@ -35,12 +35,9 @@ vendor/plantuml/plantuml-*.jar
 !vendor/kb/
 !vendor/kb/*
 
-# 发行方 Ed25519 私钥（与 scripts/license-common.mjs 内置公钥成对；切勿提交）
-admin-tool/.issuer-private.der
-admin-tool/.issuer-public.der
-admin-tool/embedded-public-hex.txt
+# admin-tool/.issuer-* 演示密钥已在仓库跟踪（学习交流场景）
 
-# 密钥生成工具：本地内置私钥覆盖（切勿提交）
+# 密钥生成工具：本地内置私钥覆盖（请勿提交敏感覆盖）
 admin-tool-gui/issuer-embedded-keys.local.mjs
 
 # 激活码管理 GUI 子工程

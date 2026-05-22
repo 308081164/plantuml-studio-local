@@ -1,12 +1,13 @@
 /**
  * 管理员工具内置发行方私钥（PKCS#8 DER 十六进制）。
  *
- * 留空时表示不使用内置私钥，仍从文件路径读取（admin-tool/.issuer-private.der
- * 或用户目录 ~/.uml-master-admin/ed25519-private.der）。
+ * 与 scripts/license-common.mjs 中的 EMBEDDED_ISSUER_PUBLIC_KEY_HEX 成对；
+ * 本仓库按学习交流场景直接入库演示密钥。
  *
- * 若在公开仓库中提交真实私钥，任何获得源码或解压后应用目录的人均可能伪造激活码；
- * 仅应在内部分发版本中填写，或通过未跟踪的 issuer-embedded-keys.local.mjs 覆盖。
+ * 留空时将回退到磁盘路径（admin-tool/.issuer-private.der 或用户目录）。
+ * 可选用 issuer-embedded-keys.local.mjs 覆盖（.gitignore，不提交）。
  */
 
-/** Ed25519 私钥（PKCS#8 DER hex）。默认留空 — 请在本机填入或改用 .local 覆盖文件。 */
-export const EMBEDDED_ISSUER_PRIVATE_PKCS8_HEX = '';
+/** Ed25519 私钥（PKCS#8 DER hex）。与客户端内置发行方公钥匹配。 */
+export const EMBEDDED_ISSUER_PRIVATE_PKCS8_HEX =
+  '302e020100300506032b6570042204204b05e5b0c80bf06168801499081ef827a99efd0e4286a533d5e0c3cf00ff35cf';

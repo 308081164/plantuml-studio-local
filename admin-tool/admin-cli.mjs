@@ -42,7 +42,7 @@ function adminDataDir() {
   return join(home, '.uml-master-admin');
 }
 
-/** 仓库内开发用私钥（与客户端内置公钥成对）；不入库，见 .gitignore */
+/** 仓库内开发与 CLI 默认私钥（与 scripts/license-common.mjs 内置公钥成对，已入库演示） */
 function repoLocalPrivateKeyPath() {
   return join(__dirname, '.issuer-private.der');
 }
