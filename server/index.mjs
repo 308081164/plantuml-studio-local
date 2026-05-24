@@ -44,6 +44,10 @@ const ALIPAY_APP_ID = process.env.ALIPAY_APP_ID || '';
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').trim().replace(/\/$/, '');
 const ALIPAY_KEY_TYPE = process.env.ALIPAY_KEY_TYPE === 'PKCS1' ? 'PKCS1' : 'PKCS8';
 
+/** 随订单返回给客户端：支付宝网页常见权限类报错的排查说明（非密钥错误） */
+const ALIPAY_PAY_PAGE_HINT_ZH =
+  '若打开支付宝网页出现「调试错误」且错误代码为 insufficient-isv-permissions（ISV权限不足）：请在「支付宝开放平台」→ 控制台 → 产品中心 为当前 App 签约并开通「电脑网站支付」，审核生效后再试。沙箱调试须设置 ALIPAY_GATEWAY=https://openapi.alipaydev.com/gateway.do，并使用沙箱 AppID 与沙箱密钥，勿与正式环境混用。';
+
 const orders = new Map();
 
 function getPublicBaseUrl(req) {
@@ -172,7 +176,13 @@ app.post('/api/orders', async (req, res) => {
       });
     }
 
-    res.json({ ok: true, orderId: id, payUrl, mock: MOCK_PAY });
+    res.json({
+      ok: true,
+      orderId: id,
+      payUrl,
+      mock: MOCK_PAY,
+      clientHintZh: MOCK_PAY ? '' : ALIPAY_PAY_PAGE_HINT_ZH,
+    });
   } catch (e) {
     console.error('[api/orders]', e);
     res.status(500).json({ ok: false, error: String(e.message || e) });
