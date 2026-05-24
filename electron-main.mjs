@@ -64,6 +64,7 @@ import {
 import { buildArchAgentSystemPrompt } from './scripts/arch-agent-prompt.mjs';
 import { buildKnowledgeInjection, resolveJarLabelFromDirs } from './scripts/kb-inject.mjs';
 import { parseEditorDocument } from './scripts/diagram-grammar.mjs';
+import { stripChinaUnivActivityStartEndStereotypes } from './scripts/china-univ-activity-sanitize.mjs';
 import { renderStudioArchSvg } from './scripts/studio-arch-graph.mjs';
 import { buildLockedEditorPlaceholder } from './scripts/agent-session-lock.mjs';
 
@@ -458,7 +459,10 @@ function buildAgentSystemPrompt(kbPayload, cfg) {
    - ⚠️ 严禁使用 note 指令！Chen ER 图语法不支持 note，使用会导致语法错误
    - 如果需要添加说明，请在实体属性中用注释或在关系名称中体现
 
-7️⃣ 每一步的输出结构（严格按顺序）：
+5️⃣bis 【再次硬性禁止】但凡写 **\`:开始;\`**、**\`:结束;\`**：**整行不得再出现任何 stereotype**。  
+即 **不允许** \`:开始; <<task>>\` / \`:结束; <<save>>\` 等写法。「<<task>> / <<save>>」**仅能**跟在**中间的处理/交互步骤**上，绝不能跟起止占位符。
+
+7️⃣ 每一步的输出结构（严格按顺序，**起止两行禁止任何标签**）：
    @startuml activity
    title [流程图标题]
    skinparam ActivityShape roundedbox
@@ -469,9 +473,9 @@ function buildAgentSystemPrompt(kbPayload, cfg) {
      BackgroundColor white
      ArrowColor black
    }
-   :开始; <<task>>
+   :开始;
    [用户需求的流程图内容]
-   :结束; <<task>>
+   :结束;
    @enduml
 
 8️⃣ 完整示例参考（登录流程）：
@@ -485,11 +489,16 @@ skinparam activity {
   BackgroundColor white
   ArrowColor black
 }
-:开始; <<task>>
+:开始;
+
 :用户打开登录页面; <<task>>
+
 :输入用户名和密码; <<save>>
+
 :点击登录按钮; <<task>>
+
 :系统校验输入是否为空; <<task>>
+
 if (用户名或密码为空?) then (是)
   :提示"用户名或密码不能为空"; <<save>>
 else (否)
@@ -508,15 +517,16 @@ else (否)
     endif
   endif
 endif
-:结束; <<task>>
+
+:结束;
+
 @enduml
 ===== 【国内高校模式强制禁止（仅约束 A 类 @startuml activity）】 =====
 （\`@startwbs\` 的 WBS 图与 \`@startchen\` 的 ER 图**不适用**下列四条；请参阅上文 B/C 专规。）
 ❌ （A）绝对不允许写 start
 ❌ （A）绝对不允许写 stop
 ❌ （A）绝对不允许 @startuml 后面不加 activity
-❌ （A）若用 :开始;/:结束; 占位，在活动图里最稳妥写法见 3️⃣4️⃣；勿与 B 类 WBS 混用
-
+❌ （A）若用 :开始;/:结束; 占位，须符合 3️⃣4️⃣5️⃣bis，**禁止**在起止两行后追加任何 <<…>> stereotype；勿与 B 类 WBS 混用
 【B/WBS 补充禁止】❌ WBS 图禁止使用 \`@startuml activity\` 作为首行 ❌ WBS 节点区域不得依赖灰底/skinparam 造成非白底观感（必须用上文 B 类专规设色）
 ===== 【输出要求】 =====
 直接输出 PlantUML 代码即可，不要任何 Markdown 解释或代码块包裹（除非你想，但代码块里的内容必须是完整 PlantUML）。
@@ -659,11 +669,20 @@ skinparam activity {
   result = result.replace(/^\s*stop\s*$/gm, ':结束;');
   result = result.replace(/^\s*Stop\s*$/gm, ':结束;');
   result = result.replace(/^\s*STOP\s*$/gm, ':结束;');
-  
+
+  result = stripChinaUnivActivityStartEndStereotypes(result);
+
   return result;
 }
 
-async function plantumlRenderCheck(source, options = ['-tpng']) {
+/** PlantUML PNG 栅格 DPI：剪贴板、主进程校验、PNG 预览/导出更清晰（SVG 不受影响） */
+const PLANTUML_PNG_RENDER_DPI = 240;
+
+function plantumlPngRenderOptions() {
+  return ['-tpng', `-Sdpi=${PLANTUML_PNG_RENDER_DPI}`];
+}
+
+async function plantumlRenderCheck(source, options = plantumlPngRenderOptions()) {
   if (!apiBase) throw new Error('PlantUML 服务未就绪');
   const res = await fetch(`${apiBase}/render`, {
     method: 'POST',
@@ -683,7 +702,7 @@ async function plantumlRenderCheck(source, options = ['-tpng']) {
 }
 
 async function plantumlRenderCheckWithOptionalSvg(source) {
-  const png = await plantumlRenderCheck(source, ['-tpng']);
+  const png = await plantumlRenderCheck(source, plantumlPngRenderOptions());
   const dual = process.env.UML_MASTER_DUAL_RENDER === '1' || process.env.UML_MASTER_DUAL_RENDER === 'true';
   if (!png.ok) return { ...png, dualSvgSkipped: !dual };
   if (!dual) return { ...png, dualSvgSkipped: true };
@@ -1790,7 +1809,7 @@ function registerIpcHandlers() {
 
   ipcMain.handle('studio:render-png-buffer', async (_e, { source }) => {
     try {
-      const { ok, buffer, errText } = await plantumlRenderCheck(String(source || ''), ['-tpng']);
+      const { ok, buffer, errText } = await plantumlRenderCheck(String(source || ''), plantumlPngRenderOptions());
       if (!ok) return { ok: false, error: errText || '渲染失败' };
       return { ok: true, base64: buffer.toString('base64') };
     } catch (e) {

@@ -38,6 +38,7 @@
       "scripts/project-context.mjs",
       "scripts/agent-intent.mjs",
       "scripts/kb-inject.mjs",
+      "scripts/china-univ-activity-sanitize.mjs",
       "scripts/diagram-grammar.mjs",
       "scripts/studio-arch-graph.mjs",
       "scripts/arch-agent-prompt.mjs",
