@@ -100,20 +100,21 @@
                 aria-label="制图技能与效果示意"
               ></div>
             </div>
-            <textarea
-              id="agent-request"
-              rows="6"
-              spellcheck="false"
-              title="最多 3000 字；超出会在输入或粘贴后自动截断并提示"
-              placeholder="例如：画一个用户登录的时序图，包含前端、网关、认证服务与数据库…"
-            ></textarea>
-            <p id="agent-request-hint" class="agent-request-hint" aria-live="polite"></p>
-            <p class="agent-nl-routing-hint">
-              已选项目目录时，会先<strong>单独调用 DeepSeek</strong>判断本次需求是否应结合仓库读文件；不需要则仅按文字生成。模型不可用或 JSON 解析失败时，会<strong>回退本地关键词规则</strong>。未选目录则始终仅按需求生成。
-              <span class="agent-nl-routing-hint__sub">
-                多轮微调：后续请求会带上此前用户说明与模型输出的 PlantUML。若路由判定需要读仓库，每轮仍会重新规划与选文件。切换项目目录时会提示新建对话或恢复该目录下的历史会话。
-              </span>
-            </p>
+            <div class="agent-compose" aria-label="智能生成输入区">
+              <div id="agent-skill-chips" class="agent-skill-chips" role="list" aria-label="已选制图能力"></div>
+              <textarea
+                id="agent-request"
+                class="agent-compose__field"
+                rows="5"
+                spellcheck="false"
+                title="最多 3000 字（含技能片段）；超出会在输入或粘贴后自动截断并提示"
+                placeholder="例如：在用户登录分支中补充「验证码错误」处理…"
+              ></textarea>
+              <div class="agent-compose__footer">
+                <p id="agent-request-hint" class="agent-request-hint" aria-live="polite"></p>
+              </div>
+            </div>
+            <p class="agent-nl-routing-hint hidden" aria-hidden="true"></p>
             <div class="agent-nl-actions">
               <button
                 type="button"
