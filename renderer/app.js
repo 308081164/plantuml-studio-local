@@ -698,8 +698,8 @@ async function getBase() {
  */
 function applyChinaUnivModeIfNeeded(source) {
   if (!isChinaUnivMode) return source;
-  
-  if (source.includes('@startchen')) {
+
+  if (source.includes('@startchen') || /@startwbs\b/i.test(source)) {
     return source;
   }
   

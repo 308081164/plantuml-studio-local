@@ -286,7 +286,26 @@ function buildAgentSystemPrompt(kbPayload, cfg) {
   const chinaModeExtra = safeCfg.chinaUnivMode ? `
 ===== 【国内高校模式：强制输出规则】 =====
 【专规优先声明】本节覆盖与本节冲突的通用表述（例如通用规则中的「可用 note 写假设」：@startchen 与国内高校活动图专规不适用处，以本节为准）。
-1️⃣ 第一行必须是：@startuml activity
+
+【国内高校 · 图类分流（必须先判断用户需求再写首行）】
+- **A 类**：程序/业务流程图（国标活动图）→ 首行 \`@startuml activity\`，遵守下列 1️⃣～8️⃣。
+- **B 类**：**系统功能结构图 / 系统功能架构图** —— 课设教材中的常见叫法；**规范专业命名为「WBS 图」**（Work Breakdown Structure，工作分解结构），表达子系统/模块/功能的 **层次拆分**（谁包含谁），**不是**业务执行步骤顺序 → 必须使用 \`@startwbs\` … \`@endwbs\`，见【B 类专规】；**禁止**把 B 类误写成 \`@startuml activity\`。
+- **C 类**：ER / 数据库概念模型 → \`@startchen\` … \`@endchen\`（见 6️⃣）。
+
+【B 类专规 · WBS（方框内需纯白背景 #FFFFFF，禁止默认灰底块）】
+1. 首行 \`@startwbs\`、末行 \`@endwbs\`（与 \`@startuml\` 无关）。
+2. 层级：行首 \`*\` 个数表示深度（例：\`* 根 ** 一级 *** 二级）。
+3. 每个 WBS 图内**必须写出**：
+   skinparam shadowing false
+   skinparam backgroundColor #FFFFFF
+   skinparam ArrowColor #000000
+   skinparam LineColor #000000
+   skinparam defaultFontColor #000000
+4. **禁止**：WBS 中写 \`start\`/\`stop\`/\`:开始;\`/\`:结束;\`；禁止用活动图语法表达结构分解。
+5. 可参考知识库「§12.7」示例；排版以用户给出的模块层次为准。
+6. 若本轮机器意图标签（见【知识库摘录】）为 wbs_cn_univ，**必须**输出 B 类语法。
+
+1️⃣ 【仅 A 类 · 流程/活动图】第一行必须是：@startuml activity
    ❌ 错误写法：@startuml（后面不加 activity 会报错）
    ✅ 正确写法：@startuml activity
 
@@ -491,20 +510,23 @@ else (否)
 endif
 :结束; <<task>>
 @enduml
-===== 【国内高校模式强制禁止】 =====
-❌ 绝对不允许写 start
-❌ 绝对不允许写 stop
-❌ 绝对不允许 @startuml 后面不加 activity
-❌ 开始/结束 一定要加 <<task>>
+===== 【国内高校模式强制禁止（仅约束 A 类 @startuml activity）】 =====
+（\`@startwbs\` 的 WBS 图与 \`@startchen\` 的 ER 图**不适用**下列四条；请参阅上文 B/C 专规。）
+❌ （A）绝对不允许写 start
+❌ （A）绝对不允许写 stop
+❌ （A）绝对不允许 @startuml 后面不加 activity
+❌ （A）若用 :开始;/:结束; 占位，在活动图里最稳妥写法见 3️⃣4️⃣；勿与 B 类 WBS 混用
+
+【B/WBS 补充禁止】❌ WBS 图禁止使用 \`@startuml activity\` 作为首行 ❌ WBS 节点区域不得依赖灰底/skinparam 造成非白底观感（必须用上文 B 类专规设色）
 ===== 【输出要求】 =====
 直接输出 PlantUML 代码即可，不要任何 Markdown 解释或代码块包裹（除非你想，但代码块里的内容必须是完整 PlantUML）。
 ` : '';
   return [
     l0,
     '你是 PlantUML 专家。用户会用自然语言描述要画的图。',
-    '你必须只输出一段完整、可渲染的 PlantUML 源码，且必须包含 @startuml 与 @enduml（或当前任务要求的其它 @start...@end 对）。',
+    '你必须只输出一段完整、可渲染的 PlantUML 源码，且首尾成对：如 \`@startuml\`／\`@enduml\`、\`@startwbs\`／\`@endwbs\`、\`@startchen\`／\`@endchen\` 等与任务匹配的一对。',
     '不要输出 Markdown 解释；若用代码块包裹，块内仍须是完整 PlantUML。',
-    '【规则优先级】通用规则允许「信息不足时在图内用 note 写假设」；若用户或任务要求 @startchen 或国内高校活动图专规，则以对应专规为准（Chen 严禁 note）。',
+    '【规则优先级】通用规则允许「信息不足时在图内用 note 写假设」；若用户或任务要求 @startchen、国内高校 A 类活动图专规或 B 类 WBS（@startwbs），则以对应专规为准（Chen 严禁 note；WBS 严禁活动图起手式）。',
     kbBlock,
     chinaModeExtra,
   ]
@@ -594,8 +616,8 @@ function applyChinaUnivModeIfNeeded(source, cfg, ctx = {}) {
   const userText = String(ctx.userText || '');
   if (!shouldApplyChinaUnivPostProcess(intent, userText)) return source;
 
-  // @startchen 语法有自己的规则，不需要应用国内高校模式转换
-  if (source.includes('@startchen')) {
+  // @startchen、@startwbs 语法不需要活动图转换，保持原样
+  if (source.includes('@startchen') || /@startwbs\b/i.test(source)) {
     return source;
   }
   

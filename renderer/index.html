@@ -306,7 +306,8 @@
         <button type="button" id="china-univ-confirm-close" class="app-dialog-close" aria-label="关闭">关闭</button>
       </div>
       <div class="app-dialog-body">
-        <p>该模式主要面向 ER 图（陈氏表示法）与流程图 / 活动图做了专门优化。</p>
+        <p>该模式主要面向 ER 图（陈氏）、<strong>国标活动流程图（@startuml activity）</strong>，以及<strong>系统功能结构图 / 系统功能架构图</strong>（规范专业命名为 <strong>WBS 图</strong>，PlantUML 用 <code>@startwbs</code>）做了专门对齐。</p>
+        <p>WBS 图要求<strong>纯白底</strong>方框示意（见产品与知识库专规）；与「程序执行流程」不是同一类图，请勿混淆。</p>
         <p>
           开启后可能会自动改写 <code>@startuml</code> 等相关源码，容易导致时序图、组件图、类图等其他类型渲染失败或异常。
         </p>
