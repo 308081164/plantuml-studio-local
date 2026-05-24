@@ -84,6 +84,75 @@ endif
 
 const $ = (id) => document.getElementById(id);
 
+/** 制图技能挂载的文案以色块存放，拼入发送给主进程的完整需求 */
+/** @type {{ uid: string; id: string; label: string; snippet: string; chipTone?: string }[]} */
+let attachedAgentSkillEntries = [];
+
+function renderAgentSkillChips() {
+  const host = $('agent-skill-chips');
+  if (!host) return;
+  host.replaceChildren();
+  for (const entry of attachedAgentSkillEntries) {
+    const chip = document.createElement('span');
+    chip.className = 'agent-skill-chip';
+    if (entry.chipTone) chip.classList.add(`agent-skill-chip--tone-${entry.chipTone}`);
+    chip.dataset.uid = entry.uid;
+    chip.setAttribute('role', 'listitem');
+    const label = document.createElement('span');
+    label.className = 'agent-skill-chip__label';
+    label.textContent = entry.label;
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.className = 'agent-skill-chip__remove';
+    x.setAttribute('aria-label', `移除「${entry.label}」`);
+    x.textContent = '×';
+    x.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      attachedAgentSkillEntries = attachedAgentSkillEntries.filter((e) => e.uid !== entry.uid);
+      renderAgentSkillChips();
+      syncAgentRequestCounter();
+      $('agent-request')?.focus();
+    });
+    chip.appendChild(label);
+    chip.appendChild(x);
+    host.appendChild(chip);
+  }
+}
+
+function attachAgentSkillFromDef(skill) {
+  const uid = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  attachedAgentSkillEntries.push({
+    uid,
+    id: skill.id,
+    label: skill.label,
+    snippet: skill.snippet || '',
+    chipTone: skill.chipTone || '',
+  });
+  renderAgentSkillChips();
+  syncAgentRequestCounter();
+  $('agent-request')?.focus();
+}
+
+function clearAgentRequestCompose() {
+  const ta = $('agent-request');
+  if (ta) ta.value = '';
+  attachedAgentSkillEntries = [];
+  renderAgentSkillChips();
+  syncAgentRequestCounter();
+}
+
+function buildFullAgentUserText() {
+  const ta = $('agent-request');
+  const tail = String(ta?.value ?? '');
+  const pre = attachedAgentSkillEntries.map((e) => e.snippet).join('');
+  return `${pre}${tail}`.trim();
+}
+
+/** @returns {number} */
+function snippetPrefixLength() {
+  return attachedAgentSkillEntries.reduce((acc, e) => acc + String(e.snippet || '').length, 0);
+}
+
 /** 当前选择的项目根目录（与主进程配置 lastProjectRoot 同步） */
 let selectedProjectRoot = '';
 
@@ -355,9 +424,7 @@ async function createNewAgentConversation() {
     messages: [],
   });
   agentConversationsState.activeId = id;
-  const ta = $('agent-request');
-  if (ta) ta.value = '';
-  syncAgentRequestCounter();
+  clearAgentRequestCompose();
   renderAgentChatSelectUi();
   await persistAgentConversations();
   setStatus('已新建对话（多轮上下文已重置）', true);
@@ -369,9 +436,7 @@ async function deleteActiveAgentConversation() {
   agentConversationsState.conversations = agentConversationsState.conversations.filter((c) => c.id !== id);
   agentConversationsState.activeId = null;
   ensureActiveAgentConversation();
-  const ta = $('agent-request');
-  if (ta) ta.value = '';
-  syncAgentRequestCounter();
+  clearAgentRequestCompose();
   renderAgentChatSelectUi();
   await persistAgentConversations();
   setStatus('已删除对话', true);
@@ -394,9 +459,7 @@ function onAgentChatSelectChange() {
       }
       showToast('已随对话切换到其绑定的项目目录', 'success');
     }
-    const ta = $('agent-request');
-    if (ta) ta.value = '';
-    syncAgentRequestCounter();
+    clearAgentRequestCompose();
     await persistAgentConversations();
     setStatus('已切换对话（需求输入框已清空；源码区未改动）', true);
   })();
@@ -718,9 +781,9 @@ skinparam activity {
 
 /** 源码框内容注入 Agent（免费版占位则跳过，避免把锁定提示送给模型） */
 function getEditorSourceForAgent() {
-  const el = $('source');
+  const el = document.getElementById('source');
   if (!el) return '';
-  const v = String(el.value ?? '');
+  const v = String('value' in el ? el.value : '');
   if (isLockedPlaceholderText(v)) return '';
   return v;
 }
@@ -1830,22 +1893,31 @@ function syncAgentRequestCounter() {
   const ta = $('agent-request');
   const hint = $('agent-request-hint');
   if (!ta) return;
+  const prefix = snippetPrefixLength();
+  if (prefix > AGENT_REQUEST_MAX_CHARS && hint) {
+    hint.textContent = `制图技能片段已超过 ${AGENT_REQUEST_MAX_CHARS} 字，请先移除部分能力标签`;
+    hint.classList.add('agent-request-hint--warn');
+    hint.classList.remove('agent-request-hint--near');
+    return;
+  }
+  const maxTail = Math.max(0, AGENT_REQUEST_MAX_CHARS - prefix);
   let v = ta.value;
   let clipped = false;
-  if (v.length > AGENT_REQUEST_MAX_CHARS) {
-    v = v.slice(0, AGENT_REQUEST_MAX_CHARS);
+  if (v.length > maxTail) {
+    v = v.slice(0, maxTail);
     ta.value = v;
     clipped = true;
   }
-  const len = v.length;
+  const tailLen = v.length;
+  const total = prefix + tailLen;
   if (hint) {
     hint.textContent = clipped
-      ? `已超过 ${AGENT_REQUEST_MAX_CHARS} 字上限，多出的内容已截断。当前 ${len} / ${AGENT_REQUEST_MAX_CHARS} 字`
-      : `${len} / ${AGENT_REQUEST_MAX_CHARS} 字`;
-    hint.classList.toggle('agent-request-hint--warn', len >= AGENT_REQUEST_MAX_CHARS);
+      ? `总需求超过 ${AGENT_REQUEST_MAX_CHARS} 字，已截断正文。当前合计 ${total} / ${AGENT_REQUEST_MAX_CHARS}（技能 ${prefix}+正文 ${tailLen}）`
+      : `合计 ${total} / ${AGENT_REQUEST_MAX_CHARS} 字（技能片段 ${prefix} + 正文 ${tailLen}）`;
+    hint.classList.toggle('agent-request-hint--warn', total >= AGENT_REQUEST_MAX_CHARS);
     hint.classList.toggle(
       'agent-request-hint--near',
-      len >= AGENT_REQUEST_MAX_CHARS - 200 && len < AGENT_REQUEST_MAX_CHARS
+      total >= AGENT_REQUEST_MAX_CHARS - 200 && total < AGENT_REQUEST_MAX_CHARS,
     );
   }
 }
@@ -1853,7 +1925,7 @@ function syncAgentRequestCounter() {
 async function runAgent() {
   if (!window.studio?.runAgent) return;
   syncAgentRequestCounter();
-  const userText = $('agent-request').value.trim();
+  const userText = buildFullAgentUserText();
   if (!userText) {
     setStatus('请填写自然语言需求', false);
     showToast('请填写自然语言需求', 'info');
@@ -1966,9 +2038,7 @@ async function pickProjectDirectory() {
 
     if (choice.kind === 'resume' && choice.conversationId) {
       agentConversationsState.activeId = choice.conversationId;
-      const ta = $('agent-request');
-      if (ta) ta.value = '';
-      syncAgentRequestCounter();
+      clearAgentRequestCompose();
       renderAgentChatSelectUi();
       await persistAgentConversations();
       showToast('已切换到该目录的历史对话', 'success');
@@ -1995,7 +2065,7 @@ async function estimateProjectContext() {
   try {
     const r = await window.studio.projectContextEstimate({
       rootPath: selectedProjectRoot,
-      userSample: $('agent-request').value.trim(),
+      userSample: buildFullAgentUserText(),
       ignoreGlobsText: projectIgnoreGlobsValue(),
     });
     if (!r?.ok) {
@@ -2026,7 +2096,7 @@ async function estimateProjectContext() {
 async function runAgentArchDraft() {
   if (!window.studio?.runAgentArchDraft) return;
   syncAgentRequestCounter();
-  const goal = $('agent-request').value.trim();
+  const goal = buildFullAgentUserText();
   if (!goal) {
     setStatus('请填写自然语言需求（例如：标出 renderer 与 electron-main 的依赖关系）', false);
     showToast('请填写自然语言需求', 'info');
@@ -2167,12 +2237,13 @@ function rebuildAgentSkillsOptions() {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'agent-skill-option';
+    if (s.menuTone) btn.classList.add(`agent-skill-option--tone-${s.menuTone}`);
     btn.setAttribute('role', 'option');
     const thumb = document.createElement('img');
     thumb.src = s.preview;
     thumb.alt = '';
-    thumb.width = 96;
-    thumb.height = 56;
+    thumb.width = 120;
+    thumb.height = 70;
     thumb.className = 'agent-skill-thumb';
     thumb.loading = 'lazy';
     const meta = document.createElement('div');
@@ -2188,7 +2259,7 @@ function rebuildAgentSkillsOptions() {
     btn.appendChild(thumb);
     btn.appendChild(meta);
     btn.addEventListener('click', () => {
-      insertSnippetAtAgentRequest(s.snippet);
+      attachAgentSkillFromDef(s);
       closeAgentSkillsPopover();
     });
     pop.appendChild(btn);
@@ -2221,21 +2292,6 @@ function closeAgentSkillsPopover() {
   agentSkillsOpen = false;
   if (btn) btn.setAttribute('aria-expanded', 'false');
   document.removeEventListener('mousedown', agentSkillsOutsideClose, true);
-}
-
-function insertSnippetAtAgentRequest(snippet) {
-  const ta = $('agent-request');
-  if (!ta) return;
-  const ins = snippet || '';
-  const start = ta.selectionStart ?? ta.value.length;
-  const end = ta.selectionEnd ?? start;
-  const before = ta.value.slice(0, start);
-  const after = ta.value.slice(end);
-  ta.value = before + ins + after;
-  const pos = start + ins.length;
-  ta.selectionStart = ta.selectionEnd = pos;
-  ta.focus();
-  syncAgentRequestCounter();
 }
 
 function wireAgentDrawingSkillsUi() {
@@ -2283,6 +2339,7 @@ function init() {
   wirePayUnlockConfirmDialog();
   $('china-univ-mode')?.addEventListener('change', () => void onChinaUnivModeToggle());
   wireAgentDrawingSkillsUi();
+  renderAgentSkillChips();
 
   $('source').value = DEFAULT_SOURCE;
   $('btn-render').addEventListener('click', () => render());

@@ -537,6 +537,7 @@ endif
   return [
     l0,
     '你是 PlantUML 专家。用户会用自然语言描述要画的图。',
+    '若用户消息中包含以「【源代码编辑器 PlantUML」」开头的段落（通常内有 ```plantuml 围栏），那是用户编辑器中的当前快照：除非用户写明「从零重写」「完全忽略编辑器」等，你必须优先在该快照基础上增删改并保持图种一致；多轮会话里历史助手旧稿仅供参考，不能替代该快照。',
     '你必须只输出一段完整、可渲染的 PlantUML 源码，且首尾成对：如 \`@startuml\`／\`@enduml\`、\`@startwbs\`／\`@endwbs\`、\`@startchen\`／\`@endchen\` 等与任务匹配的一对。',
     '不要输出 Markdown 解释；若用代码块包裹，块内仍须是完整 PlantUML。',
     '【规则优先级】通用规则允许「信息不足时在图内用 note 写假设」；若用户或任务要求 @startchen、国内高校 A 类活动图专规或 B 类 WBS（@startwbs），则以对应专规为准（Chen 严禁 note；WBS 严禁活动图起手式）。',
@@ -763,18 +764,30 @@ function buildEditorPlantumlBlock(editorSourceRaw, maxChars = AGENT_EDITOR_CONTE
   );
 }
 
-function buildAgentRetryUserContent({ isProject, round, lastErr, source, dupTail }) {
+function buildAgentRetryUserContent({
+  isProject,
+  round,
+  lastErr,
+  source,
+  dupTail,
+  editorSource = '',
+}) {
+  const editorBlock =
+    String(editorSource || '').trim().length > 0
+      ? buildEditorPlantumlBlock(editorSource, AGENT_EDITOR_CONTEXT_MAX_CHARS)
+      : '';
   const head = isProject
     ? '上一版源码经 PlantUML 校验未通过，请结合项目上下文修订后，再次输出完整源码（整段替换）。'
     : '上一版源码经 PlantUML 校验未通过，请根据错误信息修订后，再次输出完整源码（整段替换）。';
   const hint = PLANTUML_RETRY_HINT;
+  let inner;
   if (round < 2) {
-    return `${head}${hint}${dupTail}\n\n--- 错误 ---\n${lastErr}\n\n--- 当前源码 ---\n${source}`;
-  }
-  const lineNo = extractApproxLineFromPlantumlErr(lastErr);
-  const near = lineNo ? sliceSourceNearLine(source, lineNo, 22) : '';
-  const folded = foldSourceMiddle(source);
-  return `${head}${hint}${dupTail}
+    inner = `${head}${hint}${dupTail}\n\n--- 错误 ---\n${lastErr}\n\n--- 当前源码 ---\n${source}`;
+  } else {
+    const lineNo = extractApproxLineFromPlantumlErr(lastErr);
+    const near = lineNo ? sliceSourceNearLine(source, lineNo, 22) : '';
+    const folded = foldSourceMiddle(source);
+    inner = `${head}${hint}${dupTail}
 
 --- 结构化错误摘要（本地） ---
 行号提示: ${lineNo ?? '未知'}；请优先修正该行附近语法。
@@ -785,6 +798,8 @@ ${lastErr}
 ${near ? `--- 源码片段（错误行 ±N）---\n${near}\n` : ''}
 --- 完整源码（折叠参考；输出须为全新完整稿，勿只改片段）---
 ${folded}`;
+  }
+  return `${editorBlock}${inner}`;
 }
 
 /** @param {unknown} e */
@@ -1045,10 +1060,25 @@ async function runAgentPipeline(userText, conversationHistory = [], editorSource
     noRepeatHint = false;
 
     const eb0 = buildEditorPlantumlBlock(editorSource, AGENT_EDITOR_CONTEXT_MAX_CHARS);
+    if (round === 0) {
+      const trimmed = String(editorSource || '').trim();
+      logs.push(
+        trimmed.length
+          ? `[editor] 源码框快照已注入首轮（${trimmed.length} 字符）`
+          : '[editor] 源码框为空或仅空白：首轮未附带编辑器快照；若需在现有 PlantUML 上修改，请先在大纲源码框中写好底稿。',
+      );
+    }
     const userContent =
       round === 0
         ? `${eb0}用户需求：\n${userText}\n\n请输出完整可渲染的 PlantUML 源码。`
-        : buildAgentRetryUserContent({ isProject: false, round, lastErr, source, dupTail });
+        : buildAgentRetryUserContent({
+            isProject: false,
+            round,
+            lastErr,
+            source,
+            dupTail,
+            editorSource,
+          });
 
     const raw = await deepseekChat(
       cfg,
@@ -1296,10 +1326,26 @@ async function runAgentPipelineWithProject(userText, projectRoot, ignoreGlobsTex
       : '';
     noRepeatHint = false;
 
+    if (round === 0) {
+      const trimmedEd = String(editorSource || '').trim();
+      logs.push(
+        trimmedEd.length
+          ? `[editor] 源码框快照已纳入首轮项目消息（${trimmedEd.length} 字符）`
+          : '[editor] 源码框为空或仅空白：首轮项目消息未附带编辑器快照。',
+      );
+    }
+
     const userContent =
       round === 0
         ? firstUserBlock
-        : buildAgentRetryUserContent({ isProject: true, round, lastErr, source, dupTail });
+        : buildAgentRetryUserContent({
+            isProject: true,
+            round,
+            lastErr,
+            source,
+            dupTail,
+            editorSource,
+          });
 
     const raw = await deepseekChat(
       cfg,

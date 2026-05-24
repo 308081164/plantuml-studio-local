@@ -452,6 +452,126 @@ button:hover {
   background: var(--surface);
 }
 
+/* 智能生成：整块输入卡片（配色参考现代对话产品） */
+.agent-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0.45rem 0.5rem;
+  margin: 0.15rem 0 0;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(248, 250, 255, 0.65) 0%, var(--editor-bg) 40%);
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
+}
+
+.agent-skill-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+  min-height: 0;
+  padding-bottom: 0.35rem;
+}
+
+.agent-skill-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  max-width: 100%;
+  padding: 0.18rem 0.42rem;
+  padding-left: 0.55rem;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  line-height: 1.35;
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+  background: linear-gradient(135deg, #eef2ff 0%, #f8fafc 100%);
+  color: var(--text);
+}
+
+.agent-skill-chip--tone-univ-er {
+  border-color: rgba(168, 85, 247, 0.35);
+  background: linear-gradient(125deg, #faf5ff 0%, #eff6ff 100%);
+}
+
+.agent-skill-chip--tone-univ-act {
+  border-color: rgba(217, 119, 6, 0.35);
+  background: linear-gradient(125deg, #fffbeb 0%, #ecfccb 70%, #f8fafc 100%);
+}
+
+.agent-skill-chip--tone-univ-wbs {
+  border-color: rgba(5, 150, 105, 0.35);
+  background: linear-gradient(125deg, #ecfdf5 0%, #ecfeff 100%);
+}
+
+.agent-skill-chip--tone-neutral {
+  border-color: rgba(148, 163, 184, 0.45);
+  background: linear-gradient(135deg, #f1f5f9 0%, #eef2ff 100%);
+}
+
+.agent-skill-chip__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 12rem;
+}
+
+.agent-skill-chip__remove {
+  border: none;
+  background: rgba(255, 255, 255, 0.5);
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 50%;
+  width: 1.15rem;
+  height: 1.15rem;
+  display: grid;
+  place-items: center;
+}
+.agent-skill-chip__remove:hover {
+  color: #cf222e;
+  background: rgba(254, 242, 242, 0.9);
+}
+
+.agent-compose__field {
+  width: 100%;
+  min-height: 4.75rem;
+  margin: 0;
+  resize: vertical;
+  border: none;
+  border-radius: 8px;
+  padding: 0.45rem 0.42rem;
+  font-size: 0.875rem;
+  font-family: "Cascadia Code", "Consolas", "JetBrains Mono", monospace;
+  background: transparent;
+  color: var(--text);
+  outline: none;
+}
+
+.agent-compose__field::placeholder {
+  color: var(--muted);
+  opacity: 0.92;
+}
+
+.agent-compose__field:focus {
+  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.35);
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.agent-compose__footer {
+  margin-top: 0.08rem;
+  padding-top: 0.38rem;
+  border-top: 1px solid rgba(208, 215, 222, 0.45);
+}
+
+.agent-compose .agent-request-hint {
+  margin: 0;
+  font-size: 0.68rem;
+}
+
 .agent-nl-header label {
   display: block;
   font-size: 0.72rem;
@@ -554,12 +674,30 @@ button:hover {
 
 .agent-skill-thumb {
   flex: 0 0 auto;
-  width: 96px;
-  height: 56px;
+  width: 120px;
+  height: 70px;
   border-radius: 6px;
   border: 1px solid var(--border);
   object-fit: contain;
   background: #fff;
+}
+
+.agent-skill-option.agent-skill-option--tone-univ-er {
+  background: linear-gradient(118deg, #fdf4ff 0%, #eef2ff 55%, var(--surface) 100%);
+}
+
+.agent-skill-option.agent-skill-option--tone-univ-act {
+  background: linear-gradient(118deg, #fffbeb 0%, #ecfccb 50%, var(--surface) 100%);
+}
+
+.agent-skill-option.agent-skill-option--tone-univ-wbs {
+  background: linear-gradient(118deg, #ecfdf5 0%, #ecfeff 55%, var(--surface) 100%);
+}
+
+.agent-skill-option.agent-skill-option--tone-univ-er:hover,
+.agent-skill-option.agent-skill-option--tone-univ-act:hover,
+.agent-skill-option.agent-skill-option--tone-univ-wbs:hover {
+  filter: brightness(0.995);
 }
 
 .agent-skill-option__meta {
@@ -585,18 +723,6 @@ button:hover {
   opacity: 0.92;
 }
 
-.agent-nl-wrap textarea {
-  width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.4rem 0.5rem;
-  font-size: 0.85rem;
-  font-family: "Cascadia Code", "Consolas", "JetBrains Mono", monospace;
-  background: var(--editor-bg);
-  color: var(--text);
-  resize: vertical;
-  min-height: 5rem;
-}
 
 .agent-request-hint {
   margin: 0.3rem 0 0;
