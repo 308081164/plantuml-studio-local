@@ -286,7 +286,26 @@ function buildAgentSystemPrompt(kbPayload, cfg) {
   const chinaModeExtra = safeCfg.chinaUnivMode ? `
 ===== 【国内高校模式：强制输出规则】 =====
 【专规优先声明】本节覆盖与本节冲突的通用表述（例如通用规则中的「可用 note 写假设」：@startchen 与国内高校活动图专规不适用处，以本节为准）。
-1️⃣ 第一行必须是：@startuml activity
+
+【国内高校 · 图类分流（必须先判断用户需求再写首行）】
+- **A 类**：程序/业务流程图（国标活动图）→ 首行 \`@startuml activity\`，遵守下列 1️⃣～8️⃣。
+- **B 类**：**系统功能结构图 / 系统功能架构图** —— 课设教材中的常见叫法；**规范专业命名为「WBS 图」**（Work Breakdown Structure，工作分解结构），表达子系统/模块/功能的 **层次拆分**（谁包含谁），**不是**业务执行步骤顺序 → 必须使用 \`@startwbs\` … \`@endwbs\`，见【B 类专规】；**禁止**把 B 类误写成 \`@startuml activity\`。
+- **C 类**：ER / 数据库概念模型 → \`@startchen\` … \`@endchen\`（见 6️⃣）。
+
+【B 类专规 · WBS（方框内需纯白背景 #FFFFFF，禁止默认灰底块）】
+1. 首行 \`@startwbs\`、末行 \`@endwbs\`（与 \`@startuml\` 无关）。
+2. 层级：行首 \`*\` 个数表示深度（例：\`* 根 ** 一级 *** 二级）。
+3. 每个 WBS 图内**必须写出**：
+   skinparam shadowing false
+   skinparam backgroundColor #FFFFFF
+   skinparam ArrowColor #000000
+   skinparam LineColor #000000
+   skinparam defaultFontColor #000000
+4. **禁止**：WBS 中写 \`start\`/\`stop\`/\`:开始;\`/\`:结束;\`；禁止用活动图语法表达结构分解。
+5. 可参考知识库「§12.7」示例；排版以用户给出的模块层次为准。
+6. 若本轮机器意图标签（见【知识库摘录】）为 wbs_cn_univ，**必须**输出 B 类语法。
+
+1️⃣ 【仅 A 类 · 流程/活动图】第一行必须是：@startuml activity
    ❌ 错误写法：@startuml（后面不加 activity 会报错）
    ✅ 正确写法：@startuml activity
 
@@ -491,20 +510,23 @@ else (否)
 endif
 :结束; <<task>>
 @enduml
-===== 【国内高校模式强制禁止】 =====
-❌ 绝对不允许写 start
-❌ 绝对不允许写 stop
-❌ 绝对不允许 @startuml 后面不加 activity
-❌ 开始/结束 一定要加 <<task>>
+===== 【国内高校模式强制禁止（仅约束 A 类 @startuml activity）】 =====
+（\`@startwbs\` 的 WBS 图与 \`@startchen\` 的 ER 图**不适用**下列四条；请参阅上文 B/C 专规。）
+❌ （A）绝对不允许写 start
+❌ （A）绝对不允许写 stop
+❌ （A）绝对不允许 @startuml 后面不加 activity
+❌ （A）若用 :开始;/:结束; 占位，在活动图里最稳妥写法见 3️⃣4️⃣；勿与 B 类 WBS 混用
+
+【B/WBS 补充禁止】❌ WBS 图禁止使用 \`@startuml activity\` 作为首行 ❌ WBS 节点区域不得依赖灰底/skinparam 造成非白底观感（必须用上文 B 类专规设色）
 ===== 【输出要求】 =====
 直接输出 PlantUML 代码即可，不要任何 Markdown 解释或代码块包裹（除非你想，但代码块里的内容必须是完整 PlantUML）。
 ` : '';
   return [
     l0,
     '你是 PlantUML 专家。用户会用自然语言描述要画的图。',
-    '你必须只输出一段完整、可渲染的 PlantUML 源码，且必须包含 @startuml 与 @enduml（或当前任务要求的其它 @start...@end 对）。',
+    '你必须只输出一段完整、可渲染的 PlantUML 源码，且首尾成对：如 \`@startuml\`／\`@enduml\`、\`@startwbs\`／\`@endwbs\`、\`@startchen\`／\`@endchen\` 等与任务匹配的一对。',
     '不要输出 Markdown 解释；若用代码块包裹，块内仍须是完整 PlantUML。',
-    '【规则优先级】通用规则允许「信息不足时在图内用 note 写假设」；若用户或任务要求 @startchen 或国内高校活动图专规，则以对应专规为准（Chen 严禁 note）。',
+    '【规则优先级】通用规则允许「信息不足时在图内用 note 写假设」；若用户或任务要求 @startchen、国内高校 A 类活动图专规或 B 类 WBS（@startwbs），则以对应专规为准（Chen 严禁 note；WBS 严禁活动图起手式）。',
     kbBlock,
     chinaModeExtra,
   ]
@@ -594,8 +616,8 @@ function applyChinaUnivModeIfNeeded(source, cfg, ctx = {}) {
   const userText = String(ctx.userText || '');
   if (!shouldApplyChinaUnivPostProcess(intent, userText)) return source;
 
-  // @startchen 语法有自己的规则，不需要应用国内高校模式转换
-  if (source.includes('@startchen')) {
+  // @startchen、@startwbs 语法不需要活动图转换，保持原样
+  if (source.includes('@startchen') || /@startwbs\b/i.test(source)) {
     return source;
   }
   
@@ -695,6 +717,28 @@ function foldSourceMiddle(source, maxHead = 4000, maxTail = 4000) {
   if (s.length <= maxHead + maxTail + 120) return s;
   const omitted = s.length - maxHead - maxTail;
   return `${s.slice(0, maxHead)}\n\n/* …中间已省略约 ${omitted} 字符… */\n\n${s.slice(-maxTail)}`;
+}
+
+const AGENT_EDITOR_CONTEXT_MAX_CHARS = 14000;
+const PLANNER_EDITOR_CONTEXT_MAX_CHARS = 4000;
+
+/** 将源码框正文注入 Agent 上下文（可被截断）；空串则跳过 */
+function buildEditorPlantumlBlock(editorSourceRaw, maxChars = AGENT_EDITOR_CONTEXT_MAX_CHARS) {
+  const mc = Number(maxChars) > 512 ? Number(maxChars) : AGENT_EDITOR_CONTEXT_MAX_CHARS;
+  let raw = String(editorSourceRaw ?? '');
+  const trimmedLen = raw.length;
+  if (!raw.trim()) return '';
+  let note = '';
+  if (raw.length > mc) {
+    raw = `${raw.slice(0, mc)}\n\n<!-- 源码框已截断（共 ${trimmedLen} 字符），仅节选前 ${mc} 字符 -->\n`;
+    note = '（本节已截断）';
+  }
+  return (
+    `【源代码编辑器 PlantUML ${note}】用户可能要求基于本节修改：必须通读并保持与用户需求一致；若本节与需求冲突以客户本次说明为准。\n` +
+    '```plantuml\n' +
+    raw +
+    '\n```\n\n'
+  );
 }
 
 function buildAgentRetryUserContent({ isProject, round, lastErr, source, dupTail }) {
@@ -931,7 +975,7 @@ async function classifyNeedProjectWithDeepSeek(userText, cfg) {
   }
 }
 
-async function runAgentPipeline(userText, conversationHistory = []) {
+async function runAgentPipeline(userText, conversationHistory = [], editorSource = '') {
   const cfg = loadAgentConfig();
   const logs = [];
   const ut = String(userText || '');
@@ -978,9 +1022,10 @@ async function runAgentPipeline(userText, conversationHistory = []) {
       : '';
     noRepeatHint = false;
 
+    const eb0 = buildEditorPlantumlBlock(editorSource, AGENT_EDITOR_CONTEXT_MAX_CHARS);
     const userContent =
       round === 0
-        ? `用户需求：\n${userText}\n\n请输出完整可渲染的 PlantUML 源码。`
+        ? `${eb0}用户需求：\n${userText}\n\n请输出完整可渲染的 PlantUML 源码。`
         : buildAgentRetryUserContent({ isProject: false, round, lastErr, source, dupTail });
 
     const raw = await deepseekChat(
@@ -1031,7 +1076,13 @@ async function runAgentPipeline(userText, conversationHistory = []) {
  * @param {string} ignoreGlobsText
  * @param {Array<{role:string,content:string}>} [conversationHistory]
  */
-async function runAgentPipelineAdaptive(userText, projectRootFromUi, ignoreGlobsText, conversationHistory = []) {
+async function runAgentPipelineAdaptive(
+  userText,
+  projectRootFromUi,
+  ignoreGlobsText,
+  conversationHistory = [],
+  editorSource = ''
+) {
   const ut = String(userText || '').trim();
   const cfg = loadAgentConfig();
   const histArr = Array.isArray(conversationHistory) ? conversationHistory : [];
@@ -1041,7 +1092,7 @@ async function runAgentPipelineAdaptive(userText, projectRootFromUi, ignoreGlobs
   const root = rootFromUi || String(cfg.lastProjectRoot || '').trim();
 
   if (!root) {
-    const r = await runAgentPipeline(ut, histArr);
+    const r = await runAgentPipeline(ut, histArr, editorSource);
     const chatNote = histForModel.length ? ['[chat] 已携带多轮对话历史（未选择项目目录，未读仓库）。'] : [];
     return {
       ...r,
@@ -1055,7 +1106,7 @@ async function runAgentPipelineAdaptive(userText, projectRootFromUi, ignoreGlobs
   const line = `[routing:${dec.from}] need_project=${dec.needProject} confidence=${Number(dec.confidence).toFixed(2)} ${dec.reasonZh || ''}`;
 
   if (!useProject) {
-    const r = await runAgentPipeline(ut, histArr);
+    const r = await runAgentPipeline(ut, histArr, editorSource);
     const chatNote = histForModel.length ? ['[chat] 已携带多轮历史；本轮路由为纯文本生成（未读仓库）。'] : [];
     return {
       ...r,
@@ -1064,14 +1115,14 @@ async function runAgentPipelineAdaptive(userText, projectRootFromUi, ignoreGlobs
   }
 
   const chatNote2 = histForModel.length ? ['[chat] 已携带多轮历史；本轮将重新规划并读取仓库（与首轮相同流程）。'] : [];
-  const r = await runAgentPipelineWithProject(ut, root, ignoreGlobsText, histArr);
+  const r = await runAgentPipelineWithProject(ut, root, ignoreGlobsText, histArr, editorSource);
   return {
     ...r,
     logs: [line, ...chatNote2, `[routing] 结合项目目录生成：${root}`, ...(r.logs || [])],
   };
 }
 
-async function runAgentPipelineWithProject(userText, projectRoot, ignoreGlobsText, conversationHistory = []) {
+async function runAgentPipelineWithProject(userText, projectRoot, ignoreGlobsText, conversationHistory = [], editorSource = '') {
   const root = String(projectRoot || '').trim();
   if (!root) return { ok: false, error: '未选择项目目录', logs: [] };
 
@@ -1090,8 +1141,9 @@ async function runAgentPipelineWithProject(userText, projectRoot, ignoreGlobsTex
   const { text: manifestJsonl, truncated: manifestTruncated, lineCount: manifestLineCount, totalFiles } =
     formatManifestJsonl(manifest.files, 2200);
 
+  const ebPlan = buildEditorPlantumlBlock(editorSource, PLANNER_EDITOR_CONTEXT_MAX_CHARS);
   const plannerUser = [
-    '【制图目标】',
+    ebPlan ? `${ebPlan}【制图目标】` : '【制图目标】',
     String(userText || '').trim(),
     '',
     '【仓库文件清单 JSONL（path 必须在输出的 paths 中原样出现；若清单截断则仅从下列 path 中选）】',
@@ -1164,7 +1216,9 @@ async function runAgentPipelineWithProject(userText, projectRoot, ignoreGlobsTex
   });
   if (bundle.notes.length) logs.push(`文件读取：${bundle.notes.slice(0, 5).join('；')}`);
 
-  const firstUserBlock = assembleUserBlock(header, bundle.text, footer);
+  const firstUserBlockPlain = assembleUserBlock(header, bundle.text, footer);
+  const ebFull = buildEditorPlantumlBlock(editorSource, AGENT_EDITOR_CONTEXT_MAX_CHARS);
+  const firstUserBlock = `${ebFull}${firstUserBlockPlain}`;
 
   const limitCheck = checkAssembledContextLimit(firstUserBlock);
   if (!limitCheck.ok) {
@@ -1273,7 +1327,7 @@ function extractStudioArchFromModelText(raw) {
   return m ? m[0].trim() : '';
 }
 
-async function runArchitectureArchDraftAgent(userText, projectRoot, ignoreGlobsText) {
+async function runArchitectureArchDraftAgent(userText, projectRoot, ignoreGlobsText, editorSource = '') {
   const root = String(projectRoot || '').trim();
   if (!root) return { ok: false, error: '未选择项目目录', logs: [] };
 
@@ -1307,7 +1361,9 @@ async function runArchitectureArchDraftAgent(userText, projectRoot, ignoreGlobsT
     intent: 'arch_static',
   };
   const system = buildArchAgentSystemPrompt(kbPayload, cfg);
+  const ebDraft = buildEditorPlantumlBlock(editorSource, PLANNER_EDITOR_CONTEXT_MAX_CHARS);
   const userBlock = [
+    ebDraft ? `${ebDraft}` : '',
     '【项目根】',
     root,
     '',
@@ -1791,7 +1847,9 @@ function registerIpcHandlers() {
         };
       }
       const conversationHistory = Array.isArray(p.conversationHistory) ? p.conversationHistory : [];
-      const r = await runAgentPipelineAdaptive(text, projectRoot, ignoreGlobsText, conversationHistory);
+      const editorSource =
+        p.editorSource !== undefined && p.editorSource !== null ? String(p.editorSource) : '';
+      const r = await runAgentPipelineAdaptive(text, projectRoot, ignoreGlobsText, conversationHistory, editorSource);
       if (r?.ok) maybeConsumeFreeAfterSuccess(snap);
       const unlock = shouldUnlockAgentContent(snap);
       if (r.ok && !unlock) {
@@ -1916,7 +1974,9 @@ function registerIpcHandlers() {
         };
       }
       const conversationHistory = Array.isArray(p.conversationHistory) ? p.conversationHistory : [];
-      const r = await runAgentPipelineWithProject(text, p.projectRoot, p.ignoreGlobsText, conversationHistory);
+      const editorSource =
+        p.editorSource !== undefined && p.editorSource !== null ? String(p.editorSource) : '';
+      const r = await runAgentPipelineWithProject(text, p.projectRoot, p.ignoreGlobsText, conversationHistory, editorSource);
       if (r?.ok) maybeConsumeFreeAfterSuccess(snap);
       const unlock = shouldUnlockAgentContent(snap);
       if (r.ok && !unlock) {
@@ -1950,7 +2010,9 @@ function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle('studio:agent-arch-draft', async (_e, { userText, projectRoot, ignoreGlobsText }) => {
+  ipcMain.handle(
+    'studio:agent-arch-draft',
+    async (_e, { userText, projectRoot, ignoreGlobsText, editorSource }) => {
     try {
       const text = String(userText || '').trim();
       if (!text) return { ok: false, error: '请填写自然语言需求', logs: [] };
@@ -1964,7 +2026,8 @@ function registerIpcHandlers() {
       if (!String(projectRoot || '').trim()) {
         return { ok: false, error: '未选择项目目录', logs: [] };
       }
-      const r = await runArchitectureArchDraftAgent(text, projectRoot, ignoreGlobsText);
+      const es = editorSource !== undefined && editorSource !== null ? String(editorSource) : '';
+      const r = await runArchitectureArchDraftAgent(text, projectRoot, ignoreGlobsText, es);
       return { ...r, locked: false, displaySource: r.source };
     } catch (e) {
       const msg = String(e.message || e);

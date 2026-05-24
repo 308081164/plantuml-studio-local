@@ -81,6 +81,25 @@
                 删除当前
               </button>
             </div>
+            <div class="agent-skills-row" id="agent-skills-anchor">
+              <button
+                type="button"
+                id="btn-agent-skills"
+                class="ghost agent-skills-btn"
+                title="插入制图技能短语；开启「国内高校模式」时预设图类会排在列表前"
+                aria-expanded="false"
+                aria-controls="agent-skills-popover"
+              >
+                + 制图技能
+              </button>
+              <span class="agent-skills-hint">空行开头输入「/」同样可唤出列表</span>
+              <div
+                id="agent-skills-popover"
+                class="agent-skills-popover hidden"
+                role="listbox"
+                aria-label="制图技能与效果示意"
+              ></div>
+            </div>
             <textarea
               id="agent-request"
               rows="6"
@@ -306,11 +325,12 @@
         <button type="button" id="china-univ-confirm-close" class="app-dialog-close" aria-label="关闭">关闭</button>
       </div>
       <div class="app-dialog-body">
-        <p>该模式主要面向 ER 图（陈氏表示法）与流程图 / 活动图做了专门优化。</p>
+        <p>该模式主要面向 ER 图（陈氏）、<strong>国标活动流程图（@startuml activity）</strong>，以及<strong>系统功能结构图 / 系统功能架构图</strong>（规范专业命名为 <strong>WBS 图</strong>，PlantUML 用 <code>@startwbs</code>）做了专门对齐。</p>
+        <p>WBS 图要求<strong>纯白底</strong>方框示意（见产品与知识库专规）；与「程序执行流程」不是同一类图，请勿混淆。</p>
         <p>
           开启后可能会自动改写 <code>@startuml</code> 等相关源码，容易导致时序图、组件图、类图等其他类型渲染失败或异常。
         </p>
-        <p>若出现渲染失败，请先关闭本模式后再试。</p>
+        <p>若在 PlantUML 报语法错，「渲染预览 / 导出」会自动改回编辑器中的原始源码再试一次（无需手动关开关）。其余图类仍可优先用本模式的样式约定。</p>
         <p><strong>确定要开启吗？</strong></p>
       </div>
       <div class="app-dialog-actions">

@@ -40,6 +40,8 @@ function preferredSectionNums(intent) {
       return [0, 1, 2, 3, 6, 11, 13];
     case 'activity_cn_univ':
       return [0, 1, 2, 4, 5, 6, 7, 11, 12];
+    case 'wbs_cn_univ':
+      return [0, 1, 2, 4, 5, 6, 7, 11, 12];
     case 'sequence':
     case 'class_diag':
     case 'usecase':
@@ -196,7 +198,7 @@ function defaultL0(jarLabel, intent, kbLoaded) {
     '- 禁止仅输出 Markdown；若用代码块包裹，块内须为完整 PlantUML。',
     `- ${jar}。`,
     `- 当前意图标签（机器注入）：${intent}；知识库：${kbLoaded ? '已加载' : '未加载'}。`,
-    '- 当「模式专规」与下文「通用 note 假设」冲突时：以模式专规与本 L0 为准（@startchen 时严禁 note；国内高校活动图禁止 start/stop 等见专规）。',
+    '- 当「模式专规」与下文「通用 note 假设」冲突时：以模式专规与本 L0 为准（@startchen 时严禁 note；国内高校 **A** 类活动图禁止 start/stop；国内高校 **B** 类 WBS 用 @startwbs 且白底专规）。',
   ];
   return lines.join('\n');
 }

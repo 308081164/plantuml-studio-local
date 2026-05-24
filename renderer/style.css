@@ -489,6 +489,96 @@ button:hover {
   padding: 0.22rem 0.45rem !important;
 }
 
+.agent-skills-row {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.6rem;
+  margin: 0.2rem 0 0.3rem;
+}
+
+.agent-skills-btn {
+  font-size: 0.74rem !important;
+  padding: 0.2rem 0.5rem !important;
+}
+
+.agent-skills-hint {
+  font-size: 0.67rem;
+  color: var(--muted);
+}
+
+.agent-skills-popover {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  z-index: 60;
+  min-width: min(440px, 92vw);
+  max-height: 340px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 32px rgba(27, 31, 36, 0.16);
+}
+
+.agent-skills-popover.hidden {
+  display: none !important;
+}
+
+.agent-skill-option {
+  display: flex;
+  flex-direction: row;
+  gap: 0.55rem;
+  align-items: flex-start;
+  width: 100%;
+  padding: 0.5rem 0.55rem;
+  margin: 0;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(208, 215, 222, 0.55);
+}
+
+.agent-skill-option:last-child {
+  border-bottom: none;
+}
+
+.agent-skill-option:hover {
+  background: rgba(248, 250, 252, 0.95);
+}
+
+.agent-skill-thumb {
+  flex: 0 0 auto;
+  width: 96px;
+  height: 56px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  object-fit: contain;
+  background: #fff;
+}
+
+.agent-skill-option__meta {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.agent-skill-option__label {
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.agent-skill-option__desc {
+  margin-top: 0.2rem;
+  font-size: 0.71rem;
+  line-height: 1.38;
+  color: var(--muted);
+}
+
 .agent-nl-routing-hint__sub {
   display: block;
   margin-top: 0.25rem;

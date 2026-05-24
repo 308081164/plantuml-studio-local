@@ -2,7 +2,7 @@
  * 轻量规则意图分类：驱动 KB 路由与国内高校后处理是否改写 @startuml activity
  */
 
-/** @typedef {'chen_er'|'activity_cn_univ'|'sequence'|'class_diag'|'usecase'|'state'|'component'|'gantt'|'other'} DiagramIntent */
+/** @typedef {'chen_er'|'activity_cn_univ'|'wbs_cn_univ'|'sequence'|'class_diag'|'usecase'|'state'|'component'|'gantt'|'other'} DiagramIntent */
 
 /**
  * @param {string} userText
@@ -21,7 +21,15 @@ export function classifyDiagramIntent(userText, chinaUnivMode = false) {
   if (/甘特|gantt|排期/i.test(zh)) return 'gantt';
 
   if (chinaUnivMode) {
-    if (/流程|活动图|activity|国标|1526|高校|业务流程/i.test(zh)) return 'activity_cn_univ';
+    // 系统功能结构/架构图 → 教学场景标准名为 WBS 图；须与「执行流程图」区分
+    if (
+      /(?:系统)?功能(?:结构|架构)图|功能模块树|模块结构图|系统结构图|子系统(?:结构|划分)|\bWBS\b|工作分解(?:结构)?|任务分解|功能分解|层次(?:化)?结构|模块一览|树状(?:功能)?(?:图|结构)?/i.test(
+        zh
+      )
+    ) {
+      return 'wbs_cn_univ';
+    }
+    if (/流程|活动图|activity|国标|1526|业务流程/i.test(zh)) return 'activity_cn_univ';
   }
 
   return 'other';
@@ -83,6 +91,8 @@ export function wantsProjectCodeContext(userText) {
 export function shouldApplyChinaUnivPostProcess(intent, userText) {
   const zh = String(userText || '');
   if (intent === 'chen_er') return false;
+  /** WBS 使用 @startwbs，严禁套用活动图后处理 */
+  if (intent === 'wbs_cn_univ') return false;
   if (['sequence', 'class_diag', 'usecase', 'state', 'component', 'gantt'].includes(intent)) return false;
   if (intent === 'activity_cn_univ') return true;
   // other：仅当表述像流程/活动时才改写，避免误伤通用 UML
