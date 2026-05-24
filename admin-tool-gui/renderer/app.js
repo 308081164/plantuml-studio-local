@@ -20,21 +20,45 @@ function setIssuedAtDefault() {
   }
 }
 
-function syncLicenseModeUi() {
-  const perm = document.querySelector('input[name="license-mode"]:checked')?.value === 'permanent';
-  $('lbl-activate-before').classList.toggle('hidden', !perm);
-  $('gen-activate-before').classList.toggle('hidden', !perm);
-  $('lbl-valid-days').classList.toggle('hidden', perm);
-  $('gen-valid-days').classList.toggle('hidden', perm);
-  if (perm && !$('gen-activate-before').value) {
+function currentProductTier() {
+  const sel = $('gen-product-tier');
+  return sel?.value || 'legacy';
+}
+
+function syncLicenseTierUi() {
+  const tier = currentProductTier();
+  const legacy = tier === 'legacy';
+  const buyout = tier === 'co_perm_689';
+
+  $('lbl-license-mode-row').classList.toggle('hidden', !legacy);
+  $('wrap-license-mode').classList.toggle('hidden', !legacy);
+
+  $('lbl-activate-before-buyout').classList.toggle('hidden', !buyout);
+  $('gen-activate-before-buyout').classList.toggle('hidden', !buyout);
+
+  const permLegacy = legacy && document.querySelector('input[name="license-mode"]:checked')?.value === 'permanent';
+  $('lbl-activate-before-legacy').classList.toggle('hidden', !permLegacy);
+  $('gen-activate-before-legacy').classList.toggle('hidden', !permLegacy);
+
+  const timedLegacy = legacy && !permLegacy;
+  $('lbl-valid-days').classList.toggle('hidden', !timedLegacy);
+  $('gen-valid-days').classList.toggle('hidden', !timedLegacy);
+
+  if (buyout && !$('gen-activate-before-buyout').value) {
+    const d = new Date(Date.now() + 10 * 365 * 86400000).toISOString().split('T')[0];
+    $('gen-activate-before-buyout').value = d;
+  }
+  if (permLegacy && !$('gen-activate-before-legacy').value) {
     const d = new Date(Date.now() + 3 * 86400000).toISOString().split('T')[0];
-    $('gen-activate-before').value = d;
+    $('gen-activate-before-legacy').value = d;
   }
 }
 
 document.querySelectorAll('input[name="license-mode"]').forEach((r) => {
-  r.addEventListener('change', syncLicenseModeUi);
+  r.addEventListener('change', syncLicenseTierUi);
 });
+
+$('gen-product-tier')?.addEventListener('change', syncLicenseTierUi);
 
 async function refreshKeyStatus() {
   const box = $('key-status');
@@ -106,17 +130,26 @@ $('btn-generate').addEventListener('click', async () => {
   $('btn-copy-code').disabled = true;
   $('btn-save-code').disabled = true;
 
-  const licenseMode = document.querySelector('input[name="license-mode"]:checked')?.value || 'time_limited';
+  const tier = currentProductTier();
+  const legacy = tier === 'legacy';
+
+  /** @type {Record<string, unknown>} */
   const params = {
     deviceCode: $('gen-device-code').value.trim(),
     hwId: $('gen-hw-id').value.trim(),
-    licenseMode,
     issuedAt: $('gen-issued-at').value,
-    activateBefore: $('gen-activate-before').value,
-    validUntilDays: Number($('gen-valid-days').value) || 30,
     batchId: $('gen-batch').value.trim(),
     customerRef: $('gen-customer').value.trim(),
   };
+
+  if (legacy) {
+    params.licenseMode = document.querySelector('input[name="license-mode"]:checked')?.value || 'time_limited';
+    params.validUntilDays = Number($('gen-valid-days').value) || 30;
+    params.activateBeforeLegacy = $('gen-activate-before-legacy').value;
+  } else {
+    params.commercialOffer = tier;
+    params.activateBeforeBuyout = $('gen-activate-before-buyout').value;
+  }
 
   const r = await window.adminGui.generateLicense(params);
   if (!r.ok) {
@@ -249,5 +282,5 @@ $('btn-monthly-register')?.addEventListener('click', async () => {
 });
 
 setIssuedAtDefault();
-syncLicenseModeUi();
+syncLicenseTierUi();
 void refreshKeyStatus();

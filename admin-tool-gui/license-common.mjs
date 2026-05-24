@@ -32,6 +32,69 @@ export const PRODUCT_ID = 'UML-MASTER';
 /** 产品版本布局（大版本号，用于派生） */
 export const PRODUCT_LAYOUT = '2';
 
+/** 明码激活码 SKU：`commercial_offer` 字段写入签名载荷（与 license_mode 搭配） */
+export const COMMERCIAL_OFFER_DAY_PASS_99 = 'co_day_pass_9_9';
+export const COMMERCIAL_OFFER_MONTH_399 = 'co_month_39_9';
+export const COMMERCIAL_OFFER_YEAR_299 = 'co_year_299';
+/** 689 买断：与时间型并列，仍为 license_mode=permanent */
+export const COMMERCIAL_OFFER_PERM_689 = 'co_perm_689';
+
+/** 自首次在本机激活日起算截止日期（日历日），签名中不含 absolute valid_until */
+export const COMPUTED_TERM_COMMERCIAL_OFFERS = new Set([
+  COMMERCIAL_OFFER_DAY_PASS_99,
+  COMMERCIAL_OFFER_MONTH_399,
+  COMMERCIAL_OFFER_YEAR_299,
+]);
+
+/** 给用户与运营看的文案映射 */
+export const COMMERCIAL_OFFER_LABEL = {
+  [COMMERCIAL_OFFER_DAY_PASS_99]: '¥9.9 当日不限次',
+  [COMMERCIAL_OFFER_MONTH_399]: '¥39.9 按月',
+  [COMMERCIAL_OFFER_YEAR_299]: '¥299 包年',
+  [COMMERCIAL_OFFER_PERM_689]: '¥689 永久买断',
+};
+
+/** 本机日历日（与免费用量等一致，按用户时区日期） */
+export function localYmdFromDate(d = new Date()) {
+  const dt = d instanceof Date ? d : new Date(d);
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, '0');
+  const day = String(dt.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** YYYY-MM-DD + 天数 → YYYY-MM-DD（本地历法） */
+export function ymdAddCalendarDays(startYmd, deltaDays) {
+  const raw = String(startYmd || '').trim();
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (!parts) throw new Error(`invalid date ymd=${raw}`);
+  const dt = new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]));
+  dt.setDate(dt.getDate() + Number(deltaDays));
+  return localYmdFromDate(dt);
+}
+
+/** ISO8601 UTC 字符串 → 用户本地日历日（用于读出首次激活日期） */
+export function localYmdFromIsoStamp(iso) {
+  try {
+    return localYmdFromDate(new Date(iso));
+  } catch {
+    return '';
+  }
+}
+
+/** 明码 SKU：根据首次激活日计算权益最后有效自然日（含当日） */
+export function computeCommercialValidityEndYmd(firstActivateYmd, commercialOffer) {
+  const start = String(firstActivateYmd || '').trim();
+  if (!start || !COMMERCIAL_OFFER_LABEL[commercialOffer]) return '';
+  if (!COMPUTED_TERM_COMMERCIAL_OFFERS.has(commercialOffer)) return '';
+
+  if (commercialOffer === COMMERCIAL_OFFER_DAY_PASS_99) return start;
+  if (commercialOffer === COMMERCIAL_OFFER_MONTH_399) return ymdAddCalendarDays(start, 30);
+  if (commercialOffer === COMMERCIAL_OFFER_YEAR_299) return ymdAddCalendarDays(start, 364);
+
+  return '';
+}
+
 /** 激活设备码 HMAC 密钥（对称，客户端混淆存放；管理员工具持有相同密钥） */
 // 注意：对称密钥无法在向用户分发的客户端中真正隐藏，仅用于设备码一致性校验与防误输
 const K_REQ_HEX = '756d6c2d6d61737465722d61637469766174696f6e2d6b65792d7631';
@@ -259,7 +322,7 @@ export function verifyDeviceCode(deviceCode, hwId) {
  * @param {string} [params.tier] - 授权等级
  * @param {string} [params.batchId] - 批次号
  * @param {string} [params.customerRef] - 客户标识
- * @returns {string} 规范化的 JSON 载荷
+ * @param {string} [params.commercial_offer] - 明码档位 SKU（与 license_mode / validUntil 语义互斥时需遵守下方组合）
  */
 export function buildLicensePayload(params) {
   const {
@@ -271,7 +334,10 @@ export function buildLicensePayload(params) {
     tier = 'full',
     batchId = '',
     customerRef = '',
+    commercial_offer = '',
   } = params;
+
+  const sku = typeof commercial_offer === 'string' ? commercial_offer.trim() : '';
 
   const payload = {
     product_id: PRODUCT_ID,
@@ -282,11 +348,23 @@ export function buildLicensePayload(params) {
     issued_at: issuedAt,
   };
 
-  if (licenseMode === 'permanent' && activateBefore) {
+  if (sku) {
+    if (!COMMERCIAL_OFFER_LABEL[sku]) {
+      throw new Error(`未知 commercial_offer: ${sku}`);
+    }
+    payload.commercial_offer = sku;
+    if (sku === COMMERCIAL_OFFER_PERM_689 || licenseMode === 'permanent') {
+      payload.license_mode = 'permanent';
+    } else if (COMPUTED_TERM_COMMERCIAL_OFFERS.has(sku)) {
+      payload.license_mode = 'time_limited';
+    }
+  }
+
+  if (payload.license_mode === 'permanent' && activateBefore) {
     payload.activate_before = activateBefore;
   }
 
-  if (licenseMode === 'time_limited' && validUntil) {
+  if (payload.license_mode === 'time_limited' && validUntil && !COMPUTED_TERM_COMMERCIAL_OFFERS.has(sku)) {
     payload.valid_until = validUntil;
   }
 
@@ -413,9 +491,12 @@ export function validateLicenseCode(licenseCode, hwId, publicKey) {
       return { ok: false, error: `激活码已超过首激截止日期（${payload.activate_before}）` };
     }
   } else if (payload.license_mode === 'time_limited') {
-    // 限时型：检查有效期
-    if (payload.valid_until && today > payload.valid_until) {
+    if (payload.commercial_offer && COMPUTED_TERM_COMMERCIAL_OFFERS.has(payload.commercial_offer)) {
+      // 首次激活时再计算截止日期
+    } else if (payload.valid_until && today > payload.valid_until) {
       return { ok: false, error: `激活码已过期（有效期至 ${payload.valid_until}）` };
+    } else if (!payload.valid_until) {
+      return { ok: false, error: '限时授权激活码缺少 valid_until（非明码档位时请检查签发参数）' };
     }
   }
 
@@ -506,14 +587,47 @@ export function checkLicenseStatus(userDataPath, verificationContext = null) {
     };
   }
 
-  // 检查是否过期（限时型）
-  if (license.license_mode === 'time_limited' && license.valid_until) {
-    const now = new Date().toISOString().split('T')[0];
-    if (now > license.valid_until) {
+  const p = v.payload || {};
+
+  const mode =
+    typeof p.license_mode === 'string' ? p.license_mode : String(license.license_mode || '').trim();
+
+  if (mode === 'time_limited') {
+    let until = '';
+    const co = p.commercial_offer;
+
+    if (co && COMPUTED_TERM_COMMERCIAL_OFFERS.has(co)) {
+      const act = typeof license.activated_at === 'string' ? license.activated_at.trim() : '';
+      const redeemedYmd = act ? localYmdFromIsoStamp(act) : String(license.redeemed_ymd || '').trim();
+      if (!redeemedYmd) {
+        return {
+          activated: false,
+          licenseMode: 'time_limited',
+          error:
+            '授权记录不完整（缺少首次激活日期）。若刚升级到新版本后可尝试重新粘贴同一激活码完成同步，或联系管理员。',
+          payload: license,
+        };
+      }
+      until = computeCommercialValidityEndYmd(redeemedYmd, co);
+    } else {
+      until = String(p.valid_until || license.valid_until || '').trim();
+    }
+
+    if (!until) {
       return {
         activated: false,
         licenseMode: 'time_limited',
-        error: `许可证已过期（有效期至 ${license.valid_until}）`,
+        error: '无法判定限时授权的截止日期（缺少 valid_until）。请卸载授权后重新激活。',
+        payload: license,
+      };
+    }
+
+    const now = new Date().toISOString().split('T')[0];
+    if (now > until) {
+      return {
+        activated: false,
+        licenseMode: 'time_limited',
+        error: `许可证已过期（有效期至 ${until}）`,
         payload: license,
       };
     }
@@ -521,7 +635,7 @@ export function checkLicenseStatus(userDataPath, verificationContext = null) {
 
   return {
     activated: true,
-    licenseMode: license.license_mode,
+    licenseMode: mode,
     payload: license,
   };
 }

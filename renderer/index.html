@@ -136,9 +136,9 @@
         <div class="pane-title">
           预览 <span class="pane-sub">右键可复制 PNG 到剪贴板</span>
           <div class="pane-actions">
-            <button type="button" id="btn-pay-mock-local" class="ghost hidden" title="未接支付宝网关时：本地直接模拟支付成功并解锁">本地模拟支付成功</button>
-            <button type="button" id="btn-pay-unlock" class="ghost hidden" title="支付 0.8 元解锁本条智能生成内容">支付解锁</button>
-            <button type="button" id="btn-pay-done" class="ghost hidden" title="在浏览器完成支付后点此校验">我已完成支付</button>
+            <button type="button" id="btn-pay-mock-local" class="ghost hidden" title="按售价策略已由激活码解锁替代；点此将提示打开授权激活">本地模拟支付成功</button>
+            <button type="button" id="btn-pay-unlock" class="ghost hidden" title="按售价策略已由明码激活码档位替代单笔支付（功能已停用）">支付解锁</button>
+            <button type="button" id="btn-pay-done" class="ghost hidden" title="按售价策略已改为激活码开通">我已完成支付</button>
             <button type="button" id="btn-edit-mode" class="edit-mode-btn hidden" hidden aria-hidden="true" title="画板功能暂缓开放">
               进入画板
             </button>
@@ -341,21 +341,20 @@
 
     <dialog id="pay-unlock-confirm-dialog" class="app-dialog">
       <div class="app-dialog-head">
-        <h3 class="app-dialog-title">确认单次解锁付费</h3>
+        <h3 class="app-dialog-title">激活码解锁</h3>
         <button type="button" id="pay-unlock-confirm-close" class="app-dialog-close">关闭</button>
       </div>
       <div class="app-dialog-body pay-unlock-confirm-body">
         <p>
-          即将为本条<strong>智能生成</strong>内容支付 <strong>¥0.80</strong>（实际金额以支付宝页面为准）。支付成功后将仅解除<strong>当前这一条</strong>的锁定、导出与暂存限制。
+          本产品当前不提供<strong>按条付费</strong>。请购买明码激活档位并在「授权激活」中输入：<strong>¥9.9 当日不限次</strong>、<strong>¥39.9 按月</strong>、<strong>¥299 包年</strong>或<strong>¥689 永久买断</strong>；激活后即解除智能生成本条及全局相关限制。
         </p>
         <p class="pay-unlock-confirm-upgrade">
-          <strong>更推荐：</strong>购买并激活<strong>高级版（激活码）</strong>后，<strong>全部功能可长期使用</strong>，无需每次单独付费解锁。
+          若服务端单笔支付链路仍可用于其他渠道联调，主进程仍会返回不可用；界面将引导打开授权对话框。
         </p>
-        <p class="pay-unlock-confirm-note">若支付服务暂不可用，您仍可使用「本地模拟支付成功」进行联调测试。</p>
       </div>
       <div class="app-dialog-actions">
         <button type="button" id="pay-unlock-confirm-cancel" class="ghost">取消</button>
-        <button type="button" id="pay-unlock-confirm-go" class="primary">确认并打开支付</button>
+        <button type="button" id="pay-unlock-confirm-go" class="primary">打开授权激活</button>
       </div>
     </dialog>
 
