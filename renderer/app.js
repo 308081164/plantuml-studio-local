@@ -1,3 +1,4 @@
+import { stripChinaUnivActivityStartEndStereotypes } from '../scripts/china-univ-activity-sanitize.mjs';
 import { isLockedPlaceholderText } from '../scripts/agent-session-lock.mjs';
 import { parseEditorDocument } from '../scripts/diagram-grammar.mjs';
 import { sortSkillsForMenu } from './agent-skills.mjs';
@@ -57,7 +58,7 @@ skinparam activity {
   ArrowColor black
 }
 
-:开始; <<task>>
+:开始;
 
 :输入系数a,b,c的值; <<save>>
 
@@ -76,7 +77,7 @@ else (N)
   endif
 endif
 
-:结束; <<task>>
+:结束;
 
 @enduml
 `;
@@ -693,6 +694,15 @@ async function getBase() {
   return base;
 }
 
+/** PlantUML PNG 清晰度（矢量/SVG 不受此项影响） */
+const PLANTUML_PNG_SCREEN_DPI = 240;
+
+function plantumlFormatRenderOptions(fmt) {
+  const f = String(fmt || '');
+  if (f === '-tpng') return ['-tpng', `-Sdpi=${PLANTUML_PNG_SCREEN_DPI}`];
+  return [fmt];
+}
+
 /**
  * 如果开启国内高校模式，应用相应的转换
  * 注意：@startchen 语法不需要转换，保持原样
@@ -738,7 +748,9 @@ skinparam activity {
   result = result.replace(/^\s*stop\s*$/gm, ':结束;');
   result = result.replace(/^\s*Stop\s*$/gm, ':结束;');
   result = result.replace(/^\s*STOP\s*$/gm, ':结束;');
-  
+
+  result = stripChinaUnivActivityStartEndStereotypes(result);
+
   return result;
 }
 
@@ -759,7 +771,7 @@ async function fetchPlantumlRenderOnce(base, source, fmt) {
   const res = await fetch(`${base}/render`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    body: JSON.stringify({ source, options: [fmt] }),
+    body: JSON.stringify({ source, options: plantumlFormatRenderOptions(fmt) }),
   });
 
   const diagErr = (res.headers.get('x-plantuml-diagram-error') || '').trim();
