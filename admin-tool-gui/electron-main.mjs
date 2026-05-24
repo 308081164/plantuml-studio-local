@@ -24,6 +24,8 @@ const licenseCommonPath = resolveLicenseCommonPath();
 const licenseMod = await import(pathToFileURL(licenseCommonPath).href);
 const {
   EMBEDDED_ISSUER_PUBLIC_KEY_HEX,
+  COMMERCIAL_OFFER_LABEL,
+  COMMERCIAL_OFFER_PERM_689,
   generateKeyPair,
   generateHwId,
   generateDeviceCode,
@@ -226,7 +228,9 @@ app.whenReady().then(() => {
 
       const deviceCode = String(params?.deviceCode || '').trim();
       const hwId = String(params?.hwId || '').trim().toLowerCase();
-      const licenseMode = params?.licenseMode === 'permanent' ? 'permanent' : 'time_limited';
+      const licenseModeRaw = params?.licenseMode === 'permanent' ? 'permanent' : 'time_limited';
+      const commercialSkuRaw = String(params?.commercialOffer || '').trim();
+      const isLegacySku = !commercialSkuRaw || commercialSkuRaw === 'legacy';
 
       const fmt = validateDeviceCodeFormat(deviceCode);
       if (!fmt.valid) return { ok: false, error: fmt.error };
@@ -240,28 +244,44 @@ app.whenReady().then(() => {
       }
 
       const issuedAt = String(params?.issuedAt || '').trim() || new Date().toISOString().split('T')[0];
-      let activateBefore = '';
-      let validUntil = '';
 
-      if (licenseMode === 'permanent') {
-        activateBefore =
-          String(params?.activateBefore || '').trim() ||
-          new Date(Date.now() + 3 * 86400000).toISOString().split('T')[0];
-      } else {
-        const days = Math.max(1, Math.min(36500, Number(params?.validUntilDays) || 30));
-        validUntil = new Date(Date.now() + days * 86400000).toISOString().split('T')[0];
-      }
-
+      /** @type {Record<string, unknown>} */
       const payload = {
         hwId,
-        licenseMode,
         issuedAt,
         tier: 'full',
         batchId: String(params?.batchId || '').trim() || undefined,
         customerRef: String(params?.customerRef || '').trim() || undefined,
       };
-      if (activateBefore) payload.activateBefore = activateBefore;
-      if (validUntil) payload.validUntil = validUntil;
+
+      if (!isLegacySku) {
+        if (!COMMERCIAL_OFFER_LABEL?.[commercialSkuRaw]) {
+          return { ok: false, error: `未知明码档位: ${commercialSkuRaw}` };
+        }
+        payload.commercial_offer = commercialSkuRaw;
+        if (commercialSkuRaw === COMMERCIAL_OFFER_PERM_689) {
+          payload.licenseMode = 'permanent';
+          payload.activateBefore =
+            String(params?.activateBeforeBuyout || '').trim() ||
+            new Date(Date.now() + 10 * 365 * 86400000).toISOString().split('T')[0];
+        } else {
+          payload.licenseMode = 'time_limited';
+        }
+      } else {
+        payload.licenseMode = licenseModeRaw;
+        let activateBefore = '';
+        let validUntil = '';
+        if (licenseModeRaw === 'permanent') {
+          activateBefore =
+            String(params?.activateBeforeLegacy || '').trim() ||
+            new Date(Date.now() + 3 * 86400000).toISOString().split('T')[0];
+        } else {
+          const days = Math.max(1, Math.min(36500, Number(params?.validUntilDays) || 30));
+          validUntil = new Date(Date.now() + days * 86400000).toISOString().split('T')[0];
+        }
+        if (activateBefore) payload.activateBefore = activateBefore;
+        if (validUntil) payload.validUntil = validUntil;
+      }
 
       const licenseCode = generateLicenseCode(payload, privateKey);
       return { ok: true, licenseCode, payloadSummary: payload };

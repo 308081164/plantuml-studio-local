@@ -451,12 +451,10 @@ function setPreviewLockOverlay(show) {
   el.classList.toggle('hidden', !show);
 }
 
-function updatePayUnlockButtonsVisible(locked) {
+function updatePayUnlockButtonsVisible(_locked) {
   ['btn-pay-mock-local', 'btn-pay-unlock', 'btn-pay-done'].forEach((id) => {
     const b = $(id);
-    if (!b) return;
-    if (locked) b.classList.remove('hidden');
-    else b.classList.add('hidden');
+    if (b) b.classList.add('hidden');
   });
 }
 
@@ -472,13 +470,8 @@ async function applyUnlockedSource(r, statusMsg) {
 }
 
 async function runLocalMockPaySuccess() {
-  if (!window.studio?.payLocalMockComplete) return;
-  const r = await window.studio.payLocalMockComplete();
-  if (!r?.ok) {
-    setStatus(r?.error || '本地模拟解锁失败', false);
-    return;
-  }
-  await applyUnlockedSource(r, '本地模拟：已解除锁定，可正常导出与暂存');
+  showToast('演示解锁已关闭。请改用「授权激活」中的明码档位（¥9.9／¥39.9／¥299／¥689）。', 'info');
+  if (window.openLicenseDialog) await window.openLicenseDialog();
 }
 
 function wirePayUnlockConfirmDialog() {
@@ -588,50 +581,19 @@ function openChinaUnivConfirmDialog() {
 }
 
 async function beginPayUnlockFlow() {
-  const go = await openPayUnlockConfirmDialog();
-  if (!go) return;
-
-  if (!window.studio?.payOrderCreate) return;
-  const cr = await window.studio.payOrderCreate();
-  if (!cr?.ok) {
-    setStatus(cr?.error || '创建支付订单失败', false);
-    return;
-  }
-  pendingPayOrderId = cr.orderId || '';
-  if (cr.payUrl && window.studio.payOpenExternal) {
-    const openR = await window.studio.payOpenExternal(cr.payUrl);
-    if (openR && openR.ok === false) {
-      setStatus(openR.error || '无法打开浏览器', false);
-      return;
-    }
-    setStatus('若已打开支付页，完成支付后请点击「我已完成支付」', null);
-  } else {
-    setStatus('未返回支付链接（可能未启动支付服务）。可点击「本地模拟支付成功」临时解锁。', null);
-  }
+  showToast(
+    '单笔付费解锁暂未开放。请打开「授权激活」，粘贴明码激活码：¥9.9 当日不限次 · ¥39.9 按月 · ¥299 包年 · ¥689 永久。',
+    'info'
+  );
+  setStatus(
+    '请使用明码激活码：¥9.9 当日卡 · ¥39.9 月卡 · ¥299 年卡 · ¥689 永久。菜单「帮助 → 授权激活」。',
+    false
+  );
+  if (window.openLicenseDialog) await window.openLicenseDialog();
 }
 
 async function confirmPayCompleted() {
-  if (!window.studio?.payPollStatus || !window.studio?.payRedeemUnlock) return;
-  const id = pendingPayOrderId;
-  if (!id) {
-    setStatus('请先点击「支付解锁本条」生成订单', false);
-    return;
-  }
-  const st = await window.studio.payPollStatus(id);
-  if (!st?.ok) {
-    setStatus(st?.error || '查询订单失败', false);
-    return;
-  }
-  if (st.status !== 'paid' || !st.unlockToken) {
-    setStatus('尚未检测到支付成功，请稍后再试或检查网络', false);
-    return;
-  }
-  const r = await window.studio.payRedeemUnlock(st.unlockToken);
-  if (!r?.ok) {
-    setStatus(r?.error || '解锁失败', false);
-    return;
-  }
-  await applyUnlockedSource(r, '支付校验成功，已恢复源码与导出能力');
+  showToast('单笔支付已不再提供，请在「授权激活」使用明码激活码。', 'info');
 }
 
 function recordSessionExecutionLog(body) {
@@ -2473,10 +2435,10 @@ async function refreshEditionUi() {
     const monthlyOn = Boolean(s.monthlyPassActive);
     badge.textContent = pro ? '高级版' : '免费版';
     badge.title = pro
-      ? '高级版：已激活，全部功能可长期使用'
-      : monthlyOn
-        ? '当前享有月度专业权益；日免费用量上限不适用'
-        : '免费版：智能生成等内容受每日免费用量与条款约束；详见顶栏计数或「帮助 → 授权激活」';
+        ? '高级版：已激活专业权益（明码激活码 / 买断）'
+        : monthlyOn
+          ? '当前享有附加专业权益窗口；日免费用量上限不适用'
+          : '免费版：单笔在线支付暂未开放；用完后可使用明码激活码（¥9.9／¥39.9／¥299／¥689），详见「授权激活」。';
     badge.classList.toggle('edition-badge--pro', pro);
     badge.classList.toggle('edition-badge--free', !pro);
     document.body.classList.toggle('studio-edition-pro', pro);
@@ -2490,10 +2452,25 @@ async function refreshEditionUi() {
         const fl = typeof s.freeDailyLimit === 'number' ? s.freeDailyLimit : 12;
         const fr = typeof s.freeDailyRemaining === 'number' ? s.freeDailyRemaining : 0;
         quotaPill.innerHTML = `今日剩余 <code>${fr}</code>／${fl} 次`;
-        quotaPill.title = `当日免费用量剩余 ${fr}/${fl} 次；午夜起按本机日期重置（成功触发需配额的能力后递减）。`;
+        quotaPill.title = `当日免费用量剩余 ${fr}/${fl} 次；午夜起按本机日期重置（成功触发需配额的能力后递减）。用尽后可使用明码激活码（¥9.9／¥39.9／¥299／¥689）。`;
         quotaPill.classList.remove('free-quota-pill--warn', 'free-quota-pill--empty');
         if (fr <= 0) quotaPill.classList.add('free-quota-pill--empty');
         else if (fr <= Math.max(1, Math.ceil(fl / 3))) quotaPill.classList.add('free-quota-pill--warn');
+        if (fr <= 0) {
+          try {
+            const dk = new Date().toLocaleDateString('sv-SE');
+            const sk = `studio_quota_exhaust_${dk}`;
+            if (!sessionStorage.getItem(sk)) {
+              sessionStorage.setItem(sk, '1');
+              showToast(
+                '今日免费次数已用完。可在「帮助 → 授权激活」使用明码：¥9.9 当日卡 · ¥39.9 月卡 · ¥299 年卡 · ¥689 永久。',
+                'info'
+              );
+            }
+          } catch {
+            /* ignore */
+          }
+        }
       }
     }
 
@@ -2519,9 +2496,11 @@ async function refreshLicenseStatus() {
       icon.textContent = '✅';
       const mode = status.licenseMode === 'permanent' ? '永久授权' : '限时授权';
       const tier = status.payload?.tier || 'full';
+      const slab = typeof status.commercialOfferLabel === 'string' ? status.commercialOfferLabel.trim() : '';
       let base = `已激活 · 高级版（${mode}，等级: ${tier}）`;
+      if (slab) base += ` · ${slab}`;
       if (status.payload?.valid_until) {
-        base += `，激活码有效期至 ${status.payload.valid_until}`;
+        base += `，权益至 ${status.payload.valid_until}`;
       }
       const bits = [base];
       if (status.monthlyPassActive && status.monthlyValidUntil) {

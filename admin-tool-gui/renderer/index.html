@@ -40,14 +40,23 @@
       <section id="panel-gen" class="panel">
         <h2>生成软件激活码</h2>
         <div class="grid">
+          <label>明码档位 <span class="req">*</span></label>
+          <select id="gen-product-tier" class="full-width">
+            <option value="co_day_pass_9_9">¥9.9 当日不限次（按首次激活日计）</option>
+            <option value="co_month_39_9">¥39.9 按月（激活日起 30 天）</option>
+            <option value="co_year_299">¥299 包年（激活日起 364 天）</option>
+            <option value="co_perm_689">¥689 永久买断</option>
+            <option value="legacy">自定义（限时天数 / 永久首激）</option>
+          </select>
+
           <label>激活设备码 <span class="req">*</span></label>
           <input type="text" id="gen-device-code" placeholder="用户从客户端「授权激活」复制" autocomplete="off" />
 
           <label>HW_ID（设备指纹）<span class="req">*</span></label>
           <input type="text" id="gen-hw-id" placeholder="64 位十六进制，与设备码对应" autocomplete="off" />
 
-          <label>授权类型</label>
-          <div class="inline">
+          <label id="lbl-license-mode-row">授权类型（仅自定义）</label>
+          <div id="wrap-license-mode" class="inline">
             <label class="radio"><input type="radio" name="license-mode" value="time_limited" checked /> 限时</label>
             <label class="radio"><input type="radio" name="license-mode" value="permanent" /> 永久（首激窗口）</label>
           </div>
@@ -55,10 +64,13 @@
           <label>签发日期</label>
           <input type="date" id="gen-issued-at" />
 
-          <label id="lbl-activate-before" class="hidden">首激截止日期</label>
-          <input type="date" id="gen-activate-before" class="hidden" />
+          <label id="lbl-activate-before-buyout" class="hidden">买断首激截止日期</label>
+          <input type="date" id="gen-activate-before-buyout" class="hidden" />
 
-          <label id="lbl-valid-days">有效天数（限时）</label>
+          <label id="lbl-activate-before-legacy" class="hidden">首激截止日期（自定义永久）</label>
+          <input type="date" id="gen-activate-before-legacy" class="hidden" />
+
+          <label id="lbl-valid-days">有效天数（自定义限时）</label>
           <input type="number" id="gen-valid-days" min="1" max="36500" value="30" />
 
           <label>批次号（可选）</label>
@@ -101,6 +113,9 @@
         <div class="row">
           <button type="button" id="btn-device-calc" class="primary">计算</button>
         </div>
+        <pre id="device-result" class="result hidden"></pre>
+      </section>
+
       <section id="panel-monthly" class="panel">
         <h2>月度一次性密钥</h2>
         <p class="hint">生成随机密钥 → 在服务器登记 → 用户于客户端「授权激活」中核销。每个密钥仅核销一次。</p>

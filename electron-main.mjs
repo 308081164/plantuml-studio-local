@@ -35,6 +35,9 @@ import {
   getLicensePath,
   shortHwId,
   resolveIssuerPublicKeyBuffer,
+  computeCommercialValidityEndYmd,
+  localYmdFromDate,
+  COMMERCIAL_OFFER_LABEL,
 } from './scripts/license-common.mjs';
 import { FREE_DAILY_LIMIT, getFreeQuotaRemaining, consumeOneFreeUse } from './scripts/free-daily-quota.mjs';
 import { isMonthlyPassActive, writeMonthlyPass, readMonthlyPass } from './scripts/monthly-pass-local.mjs';
@@ -1761,7 +1764,7 @@ function registerIpcHandlers() {
     if (snap.level !== 'none') return null;
     return {
       ok: false,
-      error: `今日免费用量已用完（${FREE_DAILY_LIMIT}/${FREE_DAILY_LIMIT}），请明日再试，或使用菜单「帮助 → 授权激活」完成激活 / 月度密钥。`,
+      error: `今日免费用量已用完（${FREE_DAILY_LIMIT}/${FREE_DAILY_LIMIT}），请明日再试，或通过「帮助 → 授权激活」使用激活码档位：¥9.9 当日不限次 · ¥39.9 月卡 · ¥299 年卡 · ¥689 永久。`,
     };
   }
 
@@ -2304,7 +2307,8 @@ function registerIpcHandlers() {
     if (agentSessionLock?.active) {
       return {
         ok: false,
-        error: '免费版智能生成内容已锁定：预览复制、导出与加入暂存已禁用。请使用免费用量或激活专业版 / 月度密钥以解除锁定。',
+        error:
+          '智能生成本条内容已锁定：导出、复制预览与暂存不可用。单笔在线支付暂未开放，请在「帮助 → 授权激活」使用明码激活码（¥9.9 当日不限次 · ¥39.9 按月 · ¥299 包年 · ¥689 永久）。',
       };
     }
     return null;
@@ -2344,10 +2348,17 @@ function registerIpcHandlers() {
       const agentLock = agentSessionLock?.active
         ? { active: true, digest: agentSessionLock.digest }
         : { active: false, digest: '' };
+      const co =
+        typeof status.payload?.commercial_offer === 'string'
+          ? status.payload.commercial_offer.trim()
+          : '';
+      const commercialOfferLabel = co ? COMMERCIAL_OFFER_LABEL[co] || co : '';
+
       const payApiBase = resolvePayApiBase();
       return {
         ok: true,
         ...status,
+        commercialOfferLabel,
         monthlyPassActive: monthlyOn,
         monthlyValidUntil: monthlyOn && mp?.valid_until ? mp.valid_until : null,
         freeDailyRemaining: freeRem,
@@ -2423,11 +2434,24 @@ function registerIpcHandlers() {
         return { ok: false, error: result.error };
       }
 
-      // 持久化存储许可证
+      const p = result.payload || {};
+      const activatedISO = new Date().toISOString();
+      const redeemedYmd = localYmdFromDate(new Date());
+
+      let persistedValidUntil = '';
+      if (p.license_mode === 'time_limited' && typeof p.commercial_offer === 'string' && p.commercial_offer.trim()) {
+        persistedValidUntil = computeCommercialValidityEndYmd(redeemedYmd, p.commercial_offer.trim()) || '';
+      } else if (p.license_mode === 'time_limited' && typeof p.valid_until === 'string') {
+        persistedValidUntil = p.valid_until.trim();
+      }
+
+      // 持久化存储许可证（明码档位按首次激活日历日重写 valid_until）
       const licenseData = {
-        ...result.payload,
+        ...p,
         license_code: code,
-        activated_at: new Date().toISOString(),
+        activated_at: activatedISO,
+        redeemed_ymd: redeemedYmd,
+        ...(persistedValidUntil ? { valid_until: persistedValidUntil } : {}),
         license_code_prefix: code.slice(0, 20) + '…',
       };
       writeLicense(app.getPath('userData'), licenseData);
@@ -2470,78 +2494,21 @@ function registerIpcHandlers() {
     return { ok: true, editorText: String(editorText || '') };
   });
 
-  ipcMain.handle('studio:pay-order-create', async () => {
-    try {
-      if (!agentSessionLock?.active) {
-        return { ok: false, error: '当前无智能生成锁定内容，无需支付解锁' };
-      }
-      const ctx = getLicenseVerificationContext();
-      if (!ctx?.hwId) return { ok: false, error: '无法获取设备指纹' };
-      const base = resolvePayApiBase();
-      const res = await fetch(`${base}/api/orders`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          hwId: ctx.hwId,
-          contentDigest: agentSessionLock.digest,
-          sku: 'agent_output_unlock',
-          amount: 0.8,
-        }),
-      });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok || !j.ok) {
-        return { ok: false, error: j.error || `创建订单失败 HTTP ${res.status}` };
-      }
-      return { ok: true, orderId: j.orderId, payUrl: j.payUrl || '', mock: Boolean(j.mock) };
-    } catch (e) {
-      return { ok: false, error: String(e.message || e) };
-    }
-  });
+  /** 单笔在线支付已关闭（平台限制）；用户使用明码激活码解锁专业权益 */
+  ipcMain.handle('studio:pay-order-create', async () => ({
+    ok: false,
+    error: '单笔支付暂未开放，请在「帮助 → 授权激活」粘贴明码激活码：¥9.9 当日 · ¥39.9 月 · ¥299 年 · ¥689 永久。',
+  }));
 
-  ipcMain.handle('studio:pay-poll-status', async (_e, { orderId }) => {
-    try {
-      const id = String(orderId || '').trim();
-      if (!id) return { ok: false, error: '缺少 orderId' };
-      const base = resolvePayApiBase();
-      const res = await fetch(`${base}/api/orders/${encodeURIComponent(id)}/status`);
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok || !j.ok) {
-        return { ok: false, error: j.error || `HTTP ${res.status}` };
-      }
-      return { ok: true, status: j.status, unlockToken: j.unlockToken || null };
-    } catch (e) {
-      return { ok: false, error: String(e.message || e) };
-    }
-  });
+  ipcMain.handle('studio:pay-poll-status', async () => ({
+    ok: false,
+    error: '单笔支付暂未开放。',
+  }));
 
-  ipcMain.handle('studio:pay-redeem-unlock', async (_e, { unlockToken }) => {
-    try {
-      if (!agentSessionLock?.active) {
-        return { ok: false, error: '当前无锁定会话' };
-      }
-      const ctx = getLicenseVerificationContext();
-      if (!ctx?.hwId) return { ok: false, error: '无法获取设备指纹' };
-      const base = resolvePayApiBase();
-      const res = await fetch(`${base}/api/unlock/verify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          hwId: ctx.hwId,
-          contentDigest: agentSessionLock.digest,
-          unlockToken: String(unlockToken || '').trim(),
-        }),
-      });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok || !j.ok) {
-        return { ok: false, error: j.error || '校验失败' };
-      }
-      const plain = agentSessionLock.realSource;
-      clearAgentSessionLock();
-      return { ok: true, source: plain };
-    } catch (e) {
-      return { ok: false, error: String(e.message || e) };
-    }
-  });
+  ipcMain.handle('studio:pay-redeem-unlock', async () => ({
+    ok: false,
+    error: '单笔支付暂未开放。',
+  }));
 
   ipcMain.handle('studio:pay-open-external', async (_e, { url }) => {
     const u = String(url || '').trim();
@@ -2550,22 +2517,10 @@ function registerIpcHandlers() {
     return { ok: true };
   });
 
-  /**
-   * 临时方案：未接支付宝网关时，在客户端本地直接视为支付成功并解除智能生成锁定。
-   * 正式接入支付宝后可改为由服务器验签下发 unlockToken；届时可移除此 IPC 或加环境变量开关。
-   */
-  ipcMain.handle('studio:pay-local-mock-complete', () => {
-    try {
-      if (!agentSessionLock?.active) {
-        return { ok: false, error: '当前无锁定会话' };
-      }
-      const plain = agentSessionLock.realSource;
-      clearAgentSessionLock();
-      return { ok: true, source: plain };
-    } catch (e) {
-      return { ok: false, error: String(e.message || e) };
-    }
-  });
+  ipcMain.handle('studio:pay-local-mock-complete', () => ({
+    ok: false,
+    error: '演示用的「模拟支付解锁」已关闭，请改用激活码。',
+  }));
 
   ipcMain.handle('studio:license-deactivate', () => {
     try {
