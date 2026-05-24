@@ -81,6 +81,25 @@
                 删除当前
               </button>
             </div>
+            <div class="agent-skills-row" id="agent-skills-anchor">
+              <button
+                type="button"
+                id="btn-agent-skills"
+                class="ghost agent-skills-btn"
+                title="插入制图技能短语；开启「国内高校模式」时预设图类会排在列表前"
+                aria-expanded="false"
+                aria-controls="agent-skills-popover"
+              >
+                + 制图技能
+              </button>
+              <span class="agent-skills-hint">空行开头输入「/」同样可唤出列表</span>
+              <div
+                id="agent-skills-popover"
+                class="agent-skills-popover hidden"
+                role="listbox"
+                aria-label="制图技能与效果示意"
+              ></div>
+            </div>
             <textarea
               id="agent-request"
               rows="6"
@@ -311,7 +330,7 @@
         <p>
           开启后可能会自动改写 <code>@startuml</code> 等相关源码，容易导致时序图、组件图、类图等其他类型渲染失败或异常。
         </p>
-        <p>若出现渲染失败，请先关闭本模式后再试。</p>
+        <p>若在 PlantUML 报语法错，「渲染预览 / 导出」会自动改回编辑器中的原始源码再试一次（无需手动关开关）。其余图类仍可优先用本模式的样式约定。</p>
         <p><strong>确定要开启吗？</strong></p>
       </div>
       <div class="app-dialog-actions">

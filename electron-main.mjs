@@ -719,6 +719,28 @@ function foldSourceMiddle(source, maxHead = 4000, maxTail = 4000) {
   return `${s.slice(0, maxHead)}\n\n/* …中间已省略约 ${omitted} 字符… */\n\n${s.slice(-maxTail)}`;
 }
 
+const AGENT_EDITOR_CONTEXT_MAX_CHARS = 14000;
+const PLANNER_EDITOR_CONTEXT_MAX_CHARS = 4000;
+
+/** 将源码框正文注入 Agent 上下文（可被截断）；空串则跳过 */
+function buildEditorPlantumlBlock(editorSourceRaw, maxChars = AGENT_EDITOR_CONTEXT_MAX_CHARS) {
+  const mc = Number(maxChars) > 512 ? Number(maxChars) : AGENT_EDITOR_CONTEXT_MAX_CHARS;
+  let raw = String(editorSourceRaw ?? '');
+  const trimmedLen = raw.length;
+  if (!raw.trim()) return '';
+  let note = '';
+  if (raw.length > mc) {
+    raw = `${raw.slice(0, mc)}\n\n<!-- 源码框已截断（共 ${trimmedLen} 字符），仅节选前 ${mc} 字符 -->\n`;
+    note = '（本节已截断）';
+  }
+  return (
+    `【源代码编辑器 PlantUML ${note}】用户可能要求基于本节修改：必须通读并保持与用户需求一致；若本节与需求冲突以客户本次说明为准。\n` +
+    '```plantuml\n' +
+    raw +
+    '\n```\n\n'
+  );
+}
+
 function buildAgentRetryUserContent({ isProject, round, lastErr, source, dupTail }) {
   const head = isProject
     ? '上一版源码经 PlantUML 校验未通过，请结合项目上下文修订后，再次输出完整源码（整段替换）。'
@@ -953,7 +975,7 @@ async function classifyNeedProjectWithDeepSeek(userText, cfg) {
   }
 }
 
-async function runAgentPipeline(userText, conversationHistory = []) {
+async function runAgentPipeline(userText, conversationHistory = [], editorSource = '') {
   const cfg = loadAgentConfig();
   const logs = [];
   const ut = String(userText || '');
@@ -1000,9 +1022,10 @@ async function runAgentPipeline(userText, conversationHistory = []) {
       : '';
     noRepeatHint = false;
 
+    const eb0 = buildEditorPlantumlBlock(editorSource, AGENT_EDITOR_CONTEXT_MAX_CHARS);
     const userContent =
       round === 0
-        ? `用户需求：\n${userText}\n\n请输出完整可渲染的 PlantUML 源码。`
+        ? `${eb0}用户需求：\n${userText}\n\n请输出完整可渲染的 PlantUML 源码。`
         : buildAgentRetryUserContent({ isProject: false, round, lastErr, source, dupTail });
 
     const raw = await deepseekChat(
@@ -1053,7 +1076,13 @@ async function runAgentPipeline(userText, conversationHistory = []) {
  * @param {string} ignoreGlobsText
  * @param {Array<{role:string,content:string}>} [conversationHistory]
  */
-async function runAgentPipelineAdaptive(userText, projectRootFromUi, ignoreGlobsText, conversationHistory = []) {
+async function runAgentPipelineAdaptive(
+  userText,
+  projectRootFromUi,
+  ignoreGlobsText,
+  conversationHistory = [],
+  editorSource = ''
+) {
   const ut = String(userText || '').trim();
   const cfg = loadAgentConfig();
   const histArr = Array.isArray(conversationHistory) ? conversationHistory : [];
@@ -1063,7 +1092,7 @@ async function runAgentPipelineAdaptive(userText, projectRootFromUi, ignoreGlobs
   const root = rootFromUi || String(cfg.lastProjectRoot || '').trim();
 
   if (!root) {
-    const r = await runAgentPipeline(ut, histArr);
+    const r = await runAgentPipeline(ut, histArr, editorSource);
     const chatNote = histForModel.length ? ['[chat] 已携带多轮对话历史（未选择项目目录，未读仓库）。'] : [];
     return {
       ...r,
@@ -1077,7 +1106,7 @@ async function runAgentPipelineAdaptive(userText, projectRootFromUi, ignoreGlobs
   const line = `[routing:${dec.from}] need_project=${dec.needProject} confidence=${Number(dec.confidence).toFixed(2)} ${dec.reasonZh || ''}`;
 
   if (!useProject) {
-    const r = await runAgentPipeline(ut, histArr);
+    const r = await runAgentPipeline(ut, histArr, editorSource);
     const chatNote = histForModel.length ? ['[chat] 已携带多轮历史；本轮路由为纯文本生成（未读仓库）。'] : [];
     return {
       ...r,
@@ -1086,14 +1115,14 @@ async function runAgentPipelineAdaptive(userText, projectRootFromUi, ignoreGlobs
   }
 
   const chatNote2 = histForModel.length ? ['[chat] 已携带多轮历史；本轮将重新规划并读取仓库（与首轮相同流程）。'] : [];
-  const r = await runAgentPipelineWithProject(ut, root, ignoreGlobsText, histArr);
+  const r = await runAgentPipelineWithProject(ut, root, ignoreGlobsText, histArr, editorSource);
   return {
     ...r,
     logs: [line, ...chatNote2, `[routing] 结合项目目录生成：${root}`, ...(r.logs || [])],
   };
 }
 
-async function runAgentPipelineWithProject(userText, projectRoot, ignoreGlobsText, conversationHistory = []) {
+async function runAgentPipelineWithProject(userText, projectRoot, ignoreGlobsText, conversationHistory = [], editorSource = '') {
   const root = String(projectRoot || '').trim();
   if (!root) return { ok: false, error: '未选择项目目录', logs: [] };
 
@@ -1112,8 +1141,9 @@ async function runAgentPipelineWithProject(userText, projectRoot, ignoreGlobsTex
   const { text: manifestJsonl, truncated: manifestTruncated, lineCount: manifestLineCount, totalFiles } =
     formatManifestJsonl(manifest.files, 2200);
 
+  const ebPlan = buildEditorPlantumlBlock(editorSource, PLANNER_EDITOR_CONTEXT_MAX_CHARS);
   const plannerUser = [
-    '【制图目标】',
+    ebPlan ? `${ebPlan}【制图目标】` : '【制图目标】',
     String(userText || '').trim(),
     '',
     '【仓库文件清单 JSONL（path 必须在输出的 paths 中原样出现；若清单截断则仅从下列 path 中选）】',
@@ -1186,7 +1216,9 @@ async function runAgentPipelineWithProject(userText, projectRoot, ignoreGlobsTex
   });
   if (bundle.notes.length) logs.push(`文件读取：${bundle.notes.slice(0, 5).join('；')}`);
 
-  const firstUserBlock = assembleUserBlock(header, bundle.text, footer);
+  const firstUserBlockPlain = assembleUserBlock(header, bundle.text, footer);
+  const ebFull = buildEditorPlantumlBlock(editorSource, AGENT_EDITOR_CONTEXT_MAX_CHARS);
+  const firstUserBlock = `${ebFull}${firstUserBlockPlain}`;
 
   const limitCheck = checkAssembledContextLimit(firstUserBlock);
   if (!limitCheck.ok) {
@@ -1295,7 +1327,7 @@ function extractStudioArchFromModelText(raw) {
   return m ? m[0].trim() : '';
 }
 
-async function runArchitectureArchDraftAgent(userText, projectRoot, ignoreGlobsText) {
+async function runArchitectureArchDraftAgent(userText, projectRoot, ignoreGlobsText, editorSource = '') {
   const root = String(projectRoot || '').trim();
   if (!root) return { ok: false, error: '未选择项目目录', logs: [] };
 
@@ -1329,7 +1361,9 @@ async function runArchitectureArchDraftAgent(userText, projectRoot, ignoreGlobsT
     intent: 'arch_static',
   };
   const system = buildArchAgentSystemPrompt(kbPayload, cfg);
+  const ebDraft = buildEditorPlantumlBlock(editorSource, PLANNER_EDITOR_CONTEXT_MAX_CHARS);
   const userBlock = [
+    ebDraft ? `${ebDraft}` : '',
     '【项目根】',
     root,
     '',
@@ -1813,7 +1847,9 @@ function registerIpcHandlers() {
         };
       }
       const conversationHistory = Array.isArray(p.conversationHistory) ? p.conversationHistory : [];
-      const r = await runAgentPipelineAdaptive(text, projectRoot, ignoreGlobsText, conversationHistory);
+      const editorSource =
+        p.editorSource !== undefined && p.editorSource !== null ? String(p.editorSource) : '';
+      const r = await runAgentPipelineAdaptive(text, projectRoot, ignoreGlobsText, conversationHistory, editorSource);
       if (r?.ok) maybeConsumeFreeAfterSuccess(snap);
       const unlock = shouldUnlockAgentContent(snap);
       if (r.ok && !unlock) {
@@ -1938,7 +1974,9 @@ function registerIpcHandlers() {
         };
       }
       const conversationHistory = Array.isArray(p.conversationHistory) ? p.conversationHistory : [];
-      const r = await runAgentPipelineWithProject(text, p.projectRoot, p.ignoreGlobsText, conversationHistory);
+      const editorSource =
+        p.editorSource !== undefined && p.editorSource !== null ? String(p.editorSource) : '';
+      const r = await runAgentPipelineWithProject(text, p.projectRoot, p.ignoreGlobsText, conversationHistory, editorSource);
       if (r?.ok) maybeConsumeFreeAfterSuccess(snap);
       const unlock = shouldUnlockAgentContent(snap);
       if (r.ok && !unlock) {
@@ -1972,7 +2010,9 @@ function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle('studio:agent-arch-draft', async (_e, { userText, projectRoot, ignoreGlobsText }) => {
+  ipcMain.handle(
+    'studio:agent-arch-draft',
+    async (_e, { userText, projectRoot, ignoreGlobsText, editorSource }) => {
     try {
       const text = String(userText || '').trim();
       if (!text) return { ok: false, error: '请填写自然语言需求', logs: [] };
@@ -1986,7 +2026,8 @@ function registerIpcHandlers() {
       if (!String(projectRoot || '').trim()) {
         return { ok: false, error: '未选择项目目录', logs: [] };
       }
-      const r = await runArchitectureArchDraftAgent(text, projectRoot, ignoreGlobsText);
+      const es = editorSource !== undefined && editorSource !== null ? String(editorSource) : '';
+      const r = await runArchitectureArchDraftAgent(text, projectRoot, ignoreGlobsText, es);
       return { ...r, locked: false, displaySource: r.source };
     } catch (e) {
       const msg = String(e.message || e);

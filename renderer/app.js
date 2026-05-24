@@ -1,5 +1,6 @@
 import { isLockedPlaceholderText } from '../scripts/agent-session-lock.mjs';
 import { parseEditorDocument } from '../scripts/diagram-grammar.mjs';
+import { sortSkillsForMenu } from './agent-skills.mjs';
 
 /** Agent 自然语言输入框最大字符数（PlantUML 源码 #source 不设字数上限） */
 const AGENT_REQUEST_MAX_CHARS = 3000;
@@ -741,6 +742,74 @@ skinparam activity {
   return result;
 }
 
+/** 源码框内容注入 Agent（免费版占位则跳过，避免把锁定提示送给模型） */
+function getEditorSourceForAgent() {
+  const el = $('source');
+  if (!el) return '';
+  const v = String(el.value ?? '');
+  if (isLockedPlaceholderText(v)) return '';
+  return v;
+}
+
+/**
+ * PicoWeb `/render` 单次请求。
+ * @returns {{ outcome: string, errLines?: string[], diagErr?: string, svgText?: string, pngBuf?: ArrayBuffer }}
+ */
+async function fetchPlantumlRenderOnce(base, source, fmt) {
+  const res = await fetch(`${base}/render`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify({ source, options: [fmt] }),
+  });
+
+  const diagErr = (res.headers.get('x-plantuml-diagram-error') || '').trim();
+  const diagLine = res.headers.get('x-plantuml-diagram-error-line');
+  const ct = (res.headers.get('content-type') || '').toLowerCase();
+
+  const errLines = [];
+  if (diagErr) errLines.push(`x-plantuml-diagram-error: ${diagErr}`);
+  if (diagLine) errLines.push(`x-plantuml-diagram-error-line: ${diagLine}`);
+
+  if (!res.ok) {
+    const t = await res.text();
+    return { outcome: 'http_error', httpStatus: res.status, bodyText: t, errLines };
+  }
+
+  if (diagErr) {
+    if (fmt === '-tsvg' || ct.includes('svg')) await res.text();
+    else await res.arrayBuffer();
+    return { outcome: 'plantuml_error', diagErr, diagLine, errLines };
+  }
+
+  if (fmt === '-tsvg' || ct.includes('svg')) {
+    const svgText = await res.text();
+    return { outcome: 'success', svgText, pngBuf: null, errLines };
+  }
+
+  const buf = await res.arrayBuffer();
+  return { outcome: 'success', svgText: null, pngBuf: buf, errLines };
+}
+
+function applyRenderedPreview(fmt, svgText, pngBuf) {
+  if (fmt === '-tsvg' || svgText != null) {
+    $('preview-placeholder').classList.add('hidden');
+    $('preview-img').classList.add('hidden');
+    const wrap = $('preview-svg');
+    wrap.innerHTML = svgText || '';
+    wrap.classList.remove('hidden');
+    return;
+  }
+  const blob = new Blob([pngBuf], { type: 'image/png' });
+  const url = URL.createObjectURL(blob);
+  const img = $('preview-img');
+  const old = img.src;
+  if (old.startsWith('blob:')) URL.revokeObjectURL(old);
+  img.src = url;
+  img.classList.remove('hidden');
+  $('preview-placeholder').classList.add('hidden');
+  $('preview-svg').classList.add('hidden');
+}
+
 async function render() {
   const bundle = await getEffectivePlantumlBundle();
   const grammarText = bundle.locked ? bundle.source : $('source').value;
@@ -798,40 +867,36 @@ async function render() {
     return;
   }
 
-  let source = bundle.source;
-  source = applyChinaUnivModeIfNeeded(source);
+  const rawSource = bundle.source;
+  let sourceToRender = rawSource;
+  if (isChinaUnivMode) sourceToRender = applyChinaUnivModeIfNeeded(rawSource);
+  const univChangedSource = sourceToRender !== rawSource;
 
   try {
     const base = await getBase();
-    const res = await fetch(`${base}/render`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ source, options: [fmt] }),
-    });
 
-    const diagErr = (res.headers.get('x-plantuml-diagram-error') || '').trim();
-    const diagLine = res.headers.get('x-plantuml-diagram-error-line');
-    const errLines = [];
-    if (diagErr) errLines.push(`x-plantuml-diagram-error: ${diagErr}`);
-    if (diagLine) errLines.push(`x-plantuml-diagram-error-line: ${diagLine}`);
+    /** @type {Awaited<ReturnType<typeof fetchPlantumlRenderOnce>>} */
+    let r = await fetchPlantumlRenderOnce(base, sourceToRender, fmt);
+    let usedUnivFallback = false;
 
-    const ct = (res.headers.get('content-type') || '').toLowerCase();
+    if (r.outcome === 'plantuml_error' && isChinaUnivMode && univChangedSource) {
+      usedUnivFallback = true;
+      showToast('国内高校预处理与当前图不匹配，已自动改用编辑器原始源码渲染', 'info');
+      r = await fetchPlantumlRenderOnce(base, rawSource, fmt);
+    }
 
-    if (!res.ok) {
-      const t = await res.text();
-      const errBlock = [`HTTP ${res.status}`, t.slice(0, 2000)];
+    if (r.outcome === 'http_error') {
+      const errBlock = [`HTTP ${r.httpStatus}`, String(r.bodyText || '').slice(0, 2000)];
       showErrors(errBlock, 'render-http');
       setStatus('请求失败', false);
       return;
     }
 
-    if (diagErr) {
-      if (fmt === '-tsvg' || ct.includes('svg')) await res.text();
-      else await res.arrayBuffer();
+    if (r.outcome === 'plantuml_error') {
       clearPreview();
       showErrors(
-        errLines.length
-          ? errLines
+        r.errLines?.length
+          ? r.errLines
           : ['PlantUML 报告了语法或图形错误；已隐藏错误占位图（其中可能含有推广链接）。'],
         'preview-plantuml'
       );
@@ -839,28 +904,10 @@ async function render() {
       return;
     }
 
-    if (fmt === '-tsvg' || ct.includes('svg')) {
-      const svgText = await res.text();
-      $('preview-placeholder').classList.add('hidden');
-      $('preview-img').classList.add('hidden');
-      const wrap = $('preview-svg');
-      wrap.innerHTML = svgText;
-      wrap.classList.remove('hidden');
-    } else {
-      const buf = await res.arrayBuffer();
-      const blob = new Blob([buf], { type: 'image/png' });
-      const url = URL.createObjectURL(blob);
-      const img = $('preview-img');
-      const old = img.src;
-      if (old.startsWith('blob:')) URL.revokeObjectURL(old);
-      img.src = url;
-      img.classList.remove('hidden');
-      $('preview-placeholder').classList.add('hidden');
-      $('preview-svg').classList.add('hidden');
-    }
-
-    showErrors(errLines);
-    setStatus(errLines.length ? '已渲染（含响应头提示）' : '已渲染', !errLines.length);
+    applyRenderedPreview(fmt, r.svgText, r.pngBuf);
+    showErrors(r.errLines || []);
+    const fbNote = usedUnivFallback && r.outcome === 'success' ? '（已跳过高校预处理）' : '';
+    setStatus(r.errLines?.length ? `已渲染（含响应头提示）${fbNote}` : `已渲染${fbNote}`, !r.errLines?.length);
   } catch (e) {
     const raw = String(e?.message || e);
     let msg = raw;
@@ -915,40 +962,44 @@ async function exportFile() {
     return;
   }
 
-  let source = bundle.source;
   const fmtEl = $('format');
   if (!fmtEl) {
     setStatus('界面未就绪（缺少格式选择控件）', false);
     return;
   }
   const fmt = fmtEl.value;
+  const ext = fmt === '-tsvg' ? 'svg' : 'png';
   setStatus('导出中…', null);
 
-  source = applyChinaUnivModeIfNeeded(source);
+  let sourceToExport = bundle.source;
+  let rawExport = bundle.source;
+  if (isChinaUnivMode) sourceToExport = applyChinaUnivModeIfNeeded(rawExport);
+  const univChangedExport = sourceToExport !== rawExport;
 
   try {
     const base = await getBase();
-    const res = await fetch(`${base}/render`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ source, options: [fmt] }),
-    });
-    if (!res.ok) {
-      setStatus(`导出失败 HTTP ${res.status}`, false);
+    let r = await fetchPlantumlRenderOnce(base, sourceToExport, fmt);
+    if (r.outcome === 'plantuml_error' && isChinaUnivMode && univChangedExport) {
+      showToast('国内高校预处理与当前图不匹配，已自动改用编辑器原始源码导出', 'info');
+      r = await fetchPlantumlRenderOnce(base, rawExport, fmt);
+    }
+    if (r.outcome === 'http_error') {
+      setStatus(`导出失败 HTTP ${r.httpStatus}`, false);
       return;
     }
-    const diagErr = (res.headers.get('x-plantuml-diagram-error') || '').trim();
-    if (diagErr) {
-      if (fmt === '-tsvg' || (res.headers.get('content-type') || '').toLowerCase().includes('svg')) {
-        await res.text();
-      } else {
-        await res.arrayBuffer();
-      }
+    if (r.outcome === 'plantuml_error') {
       setStatus('PlantUML 报错，已取消导出（避免下载含推广信息的错误图）', false);
       return;
     }
-    const ext = fmt === '-tsvg' ? 'svg' : 'png';
-    const blob = await res.blob();
+    let blob;
+    if (fmt === '-tsvg' || r.svgText != null) {
+      blob = new Blob([r.svgText || ''], { type: 'image/svg+xml' });
+    } else if (r.pngBuf) {
+      blob = new Blob([r.pngBuf], { type: 'image/png' });
+    } else {
+      setStatus('导出失败：无图像数据', false);
+      return;
+    }
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `diagram.${ext}`;
@@ -1839,6 +1890,7 @@ async function runAgent() {
   try {
     const r = await window.studio.runAgent({
       userText,
+      editorSource: getEditorSourceForAgent(),
       projectRoot: selectedProjectRoot,
       ignoreGlobsText: projectIgnoreGlobsValue(),
       conversationHistory: getActiveConversationHistoryForApi(),
@@ -2016,6 +2068,7 @@ async function runAgentArchDraft() {
   try {
     const r = await window.studio.runAgentArchDraft({
       userText: goal,
+      editorSource: getEditorSourceForAgent(),
       projectRoot: selectedProjectRoot,
       ignoreGlobsText: projectIgnoreGlobsValue(),
     });
@@ -2128,6 +2181,116 @@ function wireAgentExpandAdvanced(elId) {
   });
 }
 
+/** Agent 制图技能（+/空行 "/"）插入片段 */
+let agentSkillsOpen = false;
+
+function rebuildAgentSkillsOptions() {
+  const pop = $('agent-skills-popover');
+  if (!pop) return;
+  pop.replaceChildren();
+  const sorted = sortSkillsForMenu(Boolean(isChinaUnivMode));
+  sorted.forEach((s) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'agent-skill-option';
+    btn.setAttribute('role', 'option');
+    const thumb = document.createElement('img');
+    thumb.src = s.preview;
+    thumb.alt = '';
+    thumb.width = 96;
+    thumb.height = 56;
+    thumb.className = 'agent-skill-thumb';
+    thumb.loading = 'lazy';
+    const meta = document.createElement('div');
+    meta.className = 'agent-skill-option__meta';
+    const lab = document.createElement('div');
+    lab.className = 'agent-skill-option__label';
+    lab.textContent = s.label;
+    const desc = document.createElement('div');
+    desc.className = 'agent-skill-option__desc';
+    desc.textContent = s.desc;
+    meta.appendChild(lab);
+    meta.appendChild(desc);
+    btn.appendChild(thumb);
+    btn.appendChild(meta);
+    btn.addEventListener('click', () => {
+      insertSnippetAtAgentRequest(s.snippet);
+      closeAgentSkillsPopover();
+    });
+    pop.appendChild(btn);
+  });
+}
+
+function openAgentSkillsPopover() {
+  const pop = $('agent-skills-popover');
+  const btn = $('btn-agent-skills');
+  if (!pop || agentSkillsOpen) return;
+  rebuildAgentSkillsOptions();
+  pop.classList.remove('hidden');
+  agentSkillsOpen = true;
+  if (btn) btn.setAttribute('aria-expanded', 'true');
+  setTimeout(() => document.addEventListener('mousedown', agentSkillsOutsideClose, true), 0);
+}
+
+/** @param {MouseEvent} ev */
+function agentSkillsOutsideClose(ev) {
+  const anchor = $('agent-skills-anchor');
+  if (anchor?.contains(ev.target)) return;
+  closeAgentSkillsPopover();
+}
+
+function closeAgentSkillsPopover() {
+  const pop = $('agent-skills-popover');
+  const btn = $('btn-agent-skills');
+  if (!agentSkillsOpen) return;
+  if (pop) pop.classList.add('hidden');
+  agentSkillsOpen = false;
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+  document.removeEventListener('mousedown', agentSkillsOutsideClose, true);
+}
+
+function insertSnippetAtAgentRequest(snippet) {
+  const ta = $('agent-request');
+  if (!ta) return;
+  const ins = snippet || '';
+  const start = ta.selectionStart ?? ta.value.length;
+  const end = ta.selectionEnd ?? start;
+  const before = ta.value.slice(0, start);
+  const after = ta.value.slice(end);
+  ta.value = before + ins + after;
+  const pos = start + ins.length;
+  ta.selectionStart = ta.selectionEnd = pos;
+  ta.focus();
+  syncAgentRequestCounter();
+}
+
+function wireAgentDrawingSkillsUi() {
+  const btn = $('btn-agent-skills');
+  const ta = $('agent-request');
+  if (!btn || !ta) return;
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (agentSkillsOpen) closeAgentSkillsPopover();
+    else openAgentSkillsPopover();
+  });
+  ta.addEventListener('keydown', (e) => {
+    if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
+    const target = /** @type {HTMLElement} */ (e.target);
+    if (target.tagName !== 'TEXTAREA') return;
+    const textarea = /** @type {HTMLTextAreaElement} */ (target);
+    const start = textarea.selectionStart ?? 0;
+    const before = textarea.value.slice(0, start);
+    if (!/^\s*$/.test(before)) return;
+    e.preventDefault();
+    if (agentSkillsOpen) closeAgentSkillsPopover();
+    else openAgentSkillsPopover();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !agentSkillsOpen) return;
+    closeAgentSkillsPopover();
+  });
+}
+
 async function syncAgentLockFromMain() {
   if (await isUiAgentLocked()) {
     document.body.classList.add('studio-agent-source-locked');
@@ -2145,7 +2308,8 @@ async function syncAgentLockFromMain() {
 function init() {
   wirePayUnlockConfirmDialog();
   $('china-univ-mode')?.addEventListener('change', () => void onChinaUnivModeToggle());
-  
+  wireAgentDrawingSkillsUi();
+
   $('source').value = DEFAULT_SOURCE;
   $('btn-render').addEventListener('click', () => render());
   $('btn-export').addEventListener('click', () => exportFile());
