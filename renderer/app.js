@@ -137,6 +137,7 @@ function clearAgentRequestCompose() {
   const ta = $('agent-request');
   if (ta) ta.value = '';
   attachedAgentSkillEntries = [];
+  clearAttachedReferenceImages();
   renderAgentSkillChips();
   syncAgentRequestCounter();
 }
@@ -151,6 +152,132 @@ function buildFullAgentUserText() {
 /** @returns {number} */
 function snippetPrefixLength() {
   return attachedAgentSkillEntries.reduce((acc, e) => acc + String(e.snippet || '').length, 0);
+}
+
+/** 参考图：由通义 VL 理解后再与正文合并送进 DeepSeek */
+const AGENT_REF_IMAGE_MAX_FILES = 4;
+const AGENT_REF_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
+
+/** @type {{ id: string; dataUrl: string }[]} */
+let attachedReferenceImages = [];
+
+function renderAgentRefImagePreviews() {
+  const host = $('agent-ref-image-previews');
+  if (!host) return;
+  host.replaceChildren();
+  for (const entry of attachedReferenceImages) {
+    const tile = document.createElement('div');
+    tile.className = 'agent-ref-preview';
+    tile.dataset.id = entry.id;
+    const im = document.createElement('img');
+    im.alt = '参考缩略图';
+    im.src = entry.dataUrl;
+    const rm = document.createElement('button');
+    rm.type = 'button';
+    rm.className = 'agent-ref-preview__rm';
+    rm.setAttribute('aria-label', '移除参考图');
+    rm.textContent = '×';
+    rm.addEventListener('click', () => removeAgentRefImage(entry.id));
+    tile.appendChild(im);
+    tile.appendChild(rm);
+    host.appendChild(tile);
+  }
+}
+
+function removeAgentRefImage(id) {
+  attachedReferenceImages = attachedReferenceImages.filter((x) => x.id !== id);
+  renderAgentRefImagePreviews();
+}
+
+function clearAttachedReferenceImages() {
+  attachedReferenceImages = [];
+  renderAgentRefImagePreviews();
+}
+
+function approxBase64DecodedBytes(b64) {
+  const pad = b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor((b64.length * 3) / 4) - pad);
+}
+
+/** @returns {{ mimeType: string; dataBase64: string }[]} */
+function getReferenceImagesPayload() {
+  /** @type {{ mimeType: string; dataBase64: string }[]} */
+  const out = [];
+  for (const e of attachedReferenceImages) {
+    const raw = String(e.dataUrl || '').trim();
+    const m = /^data:([^;,]+);base64,([\s\S]+)$/i.exec(raw);
+    if (!m) continue;
+    let mime = String(m[1]).toLowerCase().replace(/\s+/g, '');
+    if (!mime.includes('/')) mime = `image/${mime}`;
+    let b64 = String(m[2]).replace(/\s+/g, '');
+    if (mime === 'image/jpg') mime = 'image/jpeg';
+    if (!/^image\/(jpeg|png|webp|gif)$/.test(mime)) continue;
+    if (approxBase64DecodedBytes(b64) > AGENT_REF_IMAGE_MAX_BYTES || !b64) continue;
+    out.push({ mimeType: mime, dataBase64: b64 });
+  }
+  return out;
+}
+
+/**
+ * @param {File[]} files
+ */
+async function ingestReferenceImageFiles(files) {
+  let room = AGENT_REF_IMAGE_MAX_FILES - attachedReferenceImages.length;
+  if (room <= 0) {
+    showToast(`至多 ${AGENT_REF_IMAGE_MAX_FILES} 张参考图`, 'info');
+    return;
+  }
+  let added = false;
+  for (const file of files) {
+    if (room <= 0) break;
+    if (!(file instanceof File)) continue;
+    let mime = String(file.type || '').toLowerCase().trim();
+    if (mime === 'image/jpg') mime = 'image/jpeg';
+    if (!/^image\/(jpeg|png|webp|gif)$/i.test(mime)) {
+      showToast(`已跳过不支持的图像类型：${file.name}`, 'warning');
+      continue;
+    }
+    if (file.size > AGENT_REF_IMAGE_MAX_BYTES) {
+      showToast(`图像超过 ${Math.round(AGENT_REF_IMAGE_MAX_BYTES / (1024 * 1024))}MB：${file.name}`, 'warning');
+      continue;
+    }
+    const dataUrl = await new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(String(fr.result || ''));
+      fr.onerror = () => reject(new Error('读取图像失败'));
+      fr.readAsDataURL(file);
+    });
+    const b64match = /^data:[^;,]+;base64,([\s\S]+)$/i.exec(dataUrl);
+    const b64 = b64match ? String(b64match[1]).replace(/\s+/g, '') : '';
+    if (!b64 || approxBase64DecodedBytes(b64) > AGENT_REF_IMAGE_MAX_BYTES) {
+      showToast(`无法使用该图像：${file.name}`, 'warning');
+      continue;
+    }
+    attachedReferenceImages.push({
+      id: `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+      dataUrl,
+    });
+    added = true;
+    room -= 1;
+  }
+  renderAgentRefImagePreviews();
+  if (added) showToast('已添加参考图（生成时将先调用通义千问理解图片）', 'success');
+}
+
+function wireAgentReferenceImagesUi() {
+  const inp = $('agent-ref-image-input');
+  const btn = $('btn-agent-ref-image');
+  if (!inp || !btn) return;
+
+  btn.addEventListener('click', () => {
+    inp.click();
+  });
+
+  inp.addEventListener('change', () => {
+    const list = inp.files ? Array.from(inp.files) : [];
+    inp.value = '';
+    if (list.length) void ingestReferenceImageFiles(list);
+  });
 }
 
 /** 当前选择的项目根目录（与主进程配置 lastProjectRoot 同步） */
@@ -1774,6 +1901,12 @@ async function loadAgentForm() {
     $('cfg-base-url').value = c.baseUrl || '';
     $('cfg-model').value = c.model || '';
     $('cfg-max-retries').value = String(c.maxRetries ?? 3);
+    const qwk = $('cfg-qwen-api-key');
+    const qwu = $('cfg-qwen-base-url');
+    const qwm = $('cfg-qwen-vision-model');
+    if (qwk) qwk.value = c.qwenApiKey || '';
+    if (qwu) qwu.value = c.qwenBaseUrl || '';
+    if (qwm) qwm.value = c.qwenVisionModel || '';
     const ig = $('cfg-project-ignore-globs');
     if (ig) ig.value = c.projectIgnoreGlobs || '';
     selectedProjectRoot = String(c.lastProjectRoot || '').trim();
@@ -1798,6 +1931,9 @@ async function saveAgentForm() {
       baseUrl: $('cfg-base-url').value,
       model: $('cfg-model').value,
       maxRetries: Number($('cfg-max-retries').value),
+      qwenApiKey: $('cfg-qwen-api-key')?.value ?? '',
+      qwenBaseUrl: $('cfg-qwen-base-url')?.value ?? '',
+      qwenVisionModel: $('cfg-qwen-vision-model')?.value ?? '',
       projectIgnoreGlobs: projectIgnoreGlobsValue(),
       chinaUnivMode: chinaFromUi,
     });
@@ -1926,16 +2062,21 @@ async function runAgent() {
   if (!window.studio?.runAgent) return;
   syncAgentRequestCounter();
   const userText = buildFullAgentUserText();
+  const refPayload = getReferenceImagesPayload();
   if (!userText) {
     setStatus('请填写自然语言需求', false);
     showToast('请填写自然语言需求', 'info');
     return;
   }
+  const busyHint = refPayload.length
+    ? '通义千问正在理解附图，随后由 DeepSeek 生成 PlantUML…'
+    : 'DeepSeek 正在生成 PlantUML…';
   setStatus('DeepSeek 编排运行中…', null);
-  beginStudioBusy('DeepSeek 正在生成 PlantUML…');
+  beginStudioBusy(busyHint);
   try {
     const r = await window.studio.runAgent({
       userText,
+      referenceImages: refPayload,
       editorSource: getEditorSourceForAgent(),
       projectRoot: selectedProjectRoot,
       ignoreGlobsText: projectIgnoreGlobsValue(),
@@ -2339,6 +2480,7 @@ function init() {
   wirePayUnlockConfirmDialog();
   $('china-univ-mode')?.addEventListener('change', () => void onChinaUnivModeToggle());
   wireAgentDrawingSkillsUi();
+  wireAgentReferenceImagesUi();
   renderAgentSkillChips();
 
   $('source').value = DEFAULT_SOURCE;
