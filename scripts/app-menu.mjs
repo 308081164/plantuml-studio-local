@@ -96,6 +96,10 @@ export function buildZhMenu() {
       label: '帮助',
       submenu: [
         {
+          label: 'PlantUML 语法速查（应用内）',
+          click: () => sendToRenderer('studio:menu-plantuml-guide'),
+        },
+        {
           label: 'PlantUML 文档',
           click: async () => {
             await shell.openExternal('https://plantuml.com/zh/guide');

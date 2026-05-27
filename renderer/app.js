@@ -161,24 +161,6 @@ const AGENT_REF_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
 /** @type {{ id: string; dataUrl: string }[]} */
 let attachedReferenceImages = [];
 
-function openAgentRefImageViewer(dataUrl) {
-  const dlg = $('agent-ref-viewer-dialog');
-  const im = $('agent-ref-viewer-img');
-  if (!dlg || !im || !dataUrl) return;
-  im.src = dataUrl;
-  if (typeof dlg.showModal === 'function') dlg.showModal();
-}
-
-function wireAgentRefImageViewerDialog() {
-  const dlg = $('agent-ref-viewer-dialog');
-  if (!dlg || dlg.dataset.wired === '1') return;
-  dlg.dataset.wired = '1';
-  dlg.addEventListener('click', (ev) => {
-    if (ev.target === dlg) dlg.close();
-  });
-  dlg.addEventListener('cancel', () => dlg.close());
-}
-
 function renderAgentRefImagePreviews() {
   const host = $('agent-ref-image-previews');
   if (!host) return;
@@ -187,28 +169,16 @@ function renderAgentRefImagePreviews() {
     const tile = document.createElement('div');
     tile.className = 'agent-ref-preview';
     tile.dataset.id = entry.id;
-
-    const zoomBtn = document.createElement('button');
-    zoomBtn.type = 'button';
-    zoomBtn.className = 'agent-ref-preview__btn';
-    zoomBtn.setAttribute('aria-label', '放大查看参考图');
     const im = document.createElement('img');
     im.alt = '参考缩略图';
     im.src = entry.dataUrl;
-    zoomBtn.appendChild(im);
-    zoomBtn.addEventListener('click', () => openAgentRefImageViewer(entry.dataUrl));
-
     const rm = document.createElement('button');
     rm.type = 'button';
     rm.className = 'agent-ref-preview__rm';
     rm.setAttribute('aria-label', '移除参考图');
     rm.textContent = '×';
-    rm.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      removeAgentRefImage(entry.id);
-    });
-
-    tile.appendChild(zoomBtn);
+    rm.addEventListener('click', () => removeAgentRefImage(entry.id));
+    tile.appendChild(im);
     tile.appendChild(rm);
     host.appendChild(tile);
   }
@@ -258,8 +228,15 @@ async function ingestReferenceImageFiles(files) {
     return;
   }
   let added = false;
+  let limitToast = false;
   for (const file of files) {
-    if (room <= 0) break;
+    if (room <= 0) {
+      if (!limitToast) {
+        showToast(`参考图至多 ${AGENT_REF_IMAGE_MAX_FILES} 张`, 'info');
+        limitToast = true;
+      }
+      break;
+    }
     if (!(file instanceof File)) continue;
     let mime = String(file.type || '').toLowerCase().trim();
     if (mime === 'image/jpg') mime = 'image/jpeg';
@@ -295,7 +272,6 @@ async function ingestReferenceImageFiles(files) {
 }
 
 function wireAgentReferenceImagesUi() {
-  wireAgentRefImageViewerDialog();
   const inp = $('agent-ref-image-input');
   if (!inp) return;
 
@@ -329,14 +305,182 @@ function syncProjectRootDisplay(absolutePath) {
   el.classList.toggle('project-path--set', Boolean(p));
 }
 
+function deriveStashProjectName(projectRoot) {
+  const r = String(projectRoot || '').trim().replace(/\\/g, '/');
+  if (!r) return '默认项目';
+  const parts = r.split('/').filter(Boolean);
+  return parts[parts.length - 1] || '默认项目';
+}
+
+function formatStashArchivePathHint(projectRoot) {
+  const project = deriveStashProjectName(projectRoot);
+  const d = new Date();
+  const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return `${project} / ${dateKey}`;
+}
+
+async function addCurrentPreviewToStash(options = {}) {
+  if (await isUiAgentLocked()) {
+    if (!options.silent) setStatus('免费版：智能生成锁定状态下无法加入暂存区', false);
+    return { ok: false, error: 'locked' };
+  }
+  if (!previewHasContent()) {
+    if (!options.silent) setStatus('请先渲染预览再加入暂存区', false);
+    return { ok: false, error: 'no preview' };
+  }
+  const source = $('source').value;
+  const imgEl = $('preview-img');
+  const svgWrap = $('preview-svg');
+  const projectName = deriveStashProjectName(selectedProjectRoot);
+  const label =
+    options.label ||
+    `产出 ${new Date().toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    })}`;
+  let r;
+  if (!imgEl.classList.contains('hidden') && imgEl.src) {
+    const buf = await (await fetch(imgEl.src)).arrayBuffer();
+    r = await window.studio.stashAdd({
+      kind: 'png',
+      arrayBuffer: buf,
+      sourceText: source,
+      label,
+      projectName,
+    });
+  } else if (!svgWrap.classList.contains('hidden')) {
+    r = await window.studio.stashAdd({
+      kind: 'svg',
+      svgText: svgWrap.innerHTML,
+      sourceText: source,
+      label,
+      projectName,
+    });
+  } else {
+    if (!options.silent) setStatus('没有可暂存的预览', false);
+    return { ok: false, error: 'no preview' };
+  }
+  if (!r?.ok) {
+    if (!options.silent) setStatus(r?.error || '暂存失败', false);
+    return r;
+  }
+  if (!options.silent) {
+    setStatus('已加入暂存区', true);
+    showToast(`已归档至 ${formatStashArchivePathHint(selectedProjectRoot)}`, 'success');
+  }
+  await refreshStashList();
+  return r;
+}
+
+async function maybeAutoStashAfterAgentSuccess() {
+  if (!window.studio?.getAgentConfig || !window.studio?.stashAdd) return;
+  try {
+    const cfg = (await window.studio.getAgentConfig()) || {};
+    if (cfg.autoStashOnGenerate === false) return;
+    const r = await addCurrentPreviewToStash({ silent: true, label: undefined });
+    if (r?.ok) showToast(`已自动加入暂存区（${formatStashArchivePathHint(selectedProjectRoot)}）`, 'success');
+  } catch {
+    /* ignore */
+  }
+}
+
+function renderMarkdownHelpArticle(markdown) {
+  const lines = String(markdown || '').split(/\r?\n/);
+  const parts = [];
+  let inCode = false;
+  let codeBuf = [];
+  let tableBuf = [];
+  const flushCode = () => {
+    if (!codeBuf.length) return;
+    parts.push(`<pre><code>${codeBuf.join('\n').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></pre>`);
+    codeBuf = [];
+  };
+  const flushTable = () => {
+    if (tableBuf.length < 2) {
+      tableBuf = [];
+      return;
+    }
+    const rows = tableBuf.filter((l) => !/^\|[-:\s|]+\|$/.test(l.trim()));
+    let html = '<table>';
+    rows.forEach((row, idx) => {
+      const cells = row
+        .trim()
+        .replace(/^\|/, '')
+        .replace(/\|$/, '')
+        .split('|')
+        .map((c) => c.trim());
+      const tag = idx === 0 ? 'th' : 'td';
+      html += '<tr>' + cells.map((c) => `<${tag}>${c}</${tag}>`).join('') + '</tr>';
+    });
+    html += '</table>';
+    parts.push(html);
+    tableBuf = [];
+  };
+  for (const line of lines) {
+    if (line.startsWith('```')) {
+      if (inCode) {
+        inCode = false;
+        flushCode();
+      } else {
+        flushTable();
+        inCode = true;
+      }
+      continue;
+    }
+    if (inCode) {
+      codeBuf.push(line);
+      continue;
+    }
+    if (line.trim().startsWith('|')) {
+      tableBuf.push(line);
+      continue;
+    }
+    flushTable();
+    if (line.startsWith('## ')) {
+      parts.push(`<h2>${line.slice(3).trim()}</h2>`);
+    } else if (line.startsWith('# ')) {
+      parts.push(`<h2>${line.slice(2).trim()}</h2>`);
+    } else if (line.trim().startsWith('>')) {
+      parts.push(`<p><em>${line.replace(/^>\s?/, '').trim()}</em></p>`);
+    } else if (line.trim()) {
+      parts.push(`<p>${line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code>$1</code>')}</p>`);
+    }
+  }
+  flushCode();
+  flushTable();
+  return parts.join('\n');
+}
+
+async function openHelpPlantumlDialog() {
+  const dlg = $('help-plantuml-dialog');
+  const body = $('help-plantuml-body');
+  if (!dlg || !body || !window.studio?.helpPlantumlGuide) return;
+  body.innerHTML = '<p>正在加载…</p>';
+  dlg.showModal();
+  try {
+    const r = await window.studio.helpPlantumlGuide();
+    if (!r?.ok) {
+      body.innerHTML = `<p>${r?.error || '加载失败'}</p>`;
+      return;
+    }
+    body.innerHTML = renderMarkdownHelpArticle(r.markdown);
+  } catch (e) {
+    body.innerHTML = `<p>${String(e.message || e)}</p>`;
+  }
+}
+
+
 /** 国内高校模式开关 */
 let isChinaUnivMode = false;
 
 /** 最近一轮智能生成 / 项目制图的进程日志（供「文件 → 查看本次执行日志」） */
 let lastSessionExecutionLog = '';
 
-/** 暂存区文件夹数据 */
-let stashFolders = [];
 
 /** 单次支付确认弹窗 Promise 收尾（由 wirePayUnlockConfirmDialog 注册） */
 let payUnlockConfirmResolver = null;
@@ -1293,151 +1437,88 @@ async function openStashAddDialog() {
   }
   const dlg = $('stash-add-dialog');
   const nameInput = $('stash-add-name');
-  const folderSelect = $('stash-add-folder');
-
+  const pathHint = $('stash-add-path-hint');
   nameInput.value = '';
-  folderSelect.innerHTML = '<option value="">暂存区根目录</option>';
-
-  stashFolders.forEach(folder => {
-    const option = document.createElement('option');
-    option.value = folder.id;
-    option.textContent = folder.name;
-    folderSelect.appendChild(option);
-  });
-
+  if (pathHint) pathHint.textContent = `将保存至：${formatStashArchivePathHint(selectedProjectRoot)}`;
   dlg.showModal();
-  requestAnimationFrame(() => {
-    nameInput.focus();
-  });
+  requestAnimationFrame(() => nameInput.focus());
 }
 
 async function addCurrentToStashWithFolder() {
   const dlg = $('stash-add-dialog');
   const name = $('stash-add-name').value.trim();
-  const folderId = $('stash-add-folder').value;
-  
   dlg.close();
-  
-  if (!previewHasContent()) {
-    setStatus('请先渲染预览再加入暂存区', false);
-    return;
-  }
-  
   setStatus('正在写入暂存区…', null);
-  
-  try {
-    const source = $('source').value;
-    const imgEl = $('preview-img');
-    const svgWrap = $('preview-svg');
-    let r;
-    
-    if (!imgEl.classList.contains('hidden') && imgEl.src) {
-      const buf = await (await fetch(imgEl.src)).arrayBuffer();
-      r = await window.studio.stashAdd({ 
-        kind: 'png', 
-        arrayBuffer: buf, 
-        sourceText: source,
-        label: name || undefined,
-        folderId: folderId || undefined
-      });
-    } else if (!svgWrap.classList.contains('hidden')) {
-      const svgText = svgWrap.innerHTML;
-      r = await window.studio.stashAdd({ 
-        kind: 'svg', 
-        svgText, 
-        sourceText: source,
-        label: name || undefined,
-        folderId: folderId || undefined
-      });
-    } else {
-      setStatus('没有可暂存的预览', false);
-      return;
-    }
-    
-    if (!r?.ok) {
-      setStatus(r?.error || '暂存失败', false);
-      return;
-    }
-    
-    setStatus('已加入暂存区', true);
-    await refreshStashList();
-  } catch (e) {
-    setStatus(String(e.message || e), false);
-  }
+  await addCurrentPreviewToStash({ label: name || undefined });
 }
 
 async function refreshStashList() {
   if (!window.studio?.stashList) return;
   const r = await window.studio.stashList();
+  const tree = $('stash-tree');
+  const empty = $('stash-empty');
   if (!r?.ok) {
-    stashFolders = [];
-    const items = [];
     $('stash-count').textContent = '0 项';
-    const tree = $('stash-tree');
-    const empty = $('stash-empty');
     empty.classList.remove('hidden');
     tree.classList.add('hidden');
     tree.innerHTML = '';
     return;
   }
   const items = r.items || [];
-  stashFolders = r.folders || [];
-  
   $('stash-count').textContent = `${items.length} 项`;
-  const tree = $('stash-tree');
-  const empty = $('stash-empty');
-  
-  if (!items.length && !stashFolders.length) {
+  if (!items.length) {
     empty.classList.remove('hidden');
     tree.classList.add('hidden');
     tree.innerHTML = '';
     return;
   }
-  
   empty.classList.add('hidden');
   tree.classList.remove('hidden');
   tree.innerHTML = '';
-  
-  stashFolders.forEach(folder => {
-    const folderEl = document.createElement('div');
-    folderEl.className = 'stash-folder';
-    folderEl.dataset.id = folder.id;
-    
-    const icon = document.createElement('svg');
-    icon.className = 'stash-folder-icon';
-    icon.setAttribute('viewBox', '0 0 24 24');
-    icon.innerHTML = '<path fill="currentColor" d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>';
-    
-    const name = document.createElement('span');
-    name.className = 'stash-folder-name';
-    name.textContent = folder.name;
-    
-    const count = document.createElement('span');
-    count.className = 'stash-folder-count';
-    const folderItems = items.filter(i => i.folderId === folder.id);
-    count.textContent = `${folderItems.length} 项`;
-    
-    folderEl.appendChild(icon);
-    folderEl.appendChild(name);
-    folderEl.appendChild(count);
-    
-    folderEl.addEventListener('click', () => {
-      showStashFolderContent(folder.id);
-    });
-    
-    tree.appendChild(folderEl);
-  });
-  
-  const grid = document.createElement('div');
-  grid.className = 'stash-grid';
-  
-  const rootItems = items.filter(i => !i.folderId);
-  
-  rootItems.forEach(it => {
-    grid.appendChild(createStashCard(it));
-  });
-  
-  tree.appendChild(grid);
+
+  const grouped = new Map();
+  for (const it of items) {
+    const project = it.projectName || '默认项目';
+    const dateKey = it.dateKey || '未知日期';
+    if (!grouped.has(project)) grouped.set(project, new Map());
+    const dates = grouped.get(project);
+    if (!dates.has(dateKey)) dates.set(dateKey, []);
+    dates.get(dateKey).push(it);
+  }
+
+  const archiveRoot = document.createElement('div');
+  archiveRoot.className = 'stash-archive-tree';
+
+  for (const [projectName, datesMap] of grouped) {
+    const projectEl = document.createElement('section');
+    projectEl.className = 'stash-archive-project';
+
+    const head = document.createElement('div');
+    head.className = 'stash-archive-project__head';
+    head.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg><span>${projectName}</span>`;
+    projectEl.appendChild(head);
+
+    const sortedDates = [...datesMap.keys()].sort((a, b) => b.localeCompare(a));
+    for (const dateKey of sortedDates) {
+      const dateBlock = document.createElement('div');
+      dateBlock.className = 'stash-archive-date';
+
+      const dateHead = document.createElement('div');
+      dateHead.className = 'stash-archive-date__head';
+      dateHead.textContent = dateKey;
+      dateBlock.appendChild(dateHead);
+
+      const grid = document.createElement('div');
+      grid.className = 'stash-grid';
+      for (const it of datesMap.get(dateKey)) {
+        grid.appendChild(createStashCard(it));
+      }
+      dateBlock.appendChild(grid);
+      projectEl.appendChild(dateBlock);
+    }
+    archiveRoot.appendChild(projectEl);
+  }
+  tree.appendChild(archiveRoot);
 }
 
 function createStashCard(it) {
@@ -1499,29 +1580,6 @@ function createStashCard(it) {
   return card;
 }
 
-function showStashFolderContent(folderId) {
-  const tree = $('stash-tree');
-  tree.innerHTML = '';
-  
-  const backBtn = document.createElement('button');
-  backBtn.type = 'button';
-  backBtn.textContent = '← 返回根目录';
-  backBtn.addEventListener('click', () => refreshStashList());
-  tree.appendChild(backBtn);
-  
-  const grid = document.createElement('div');
-  grid.className = 'stash-grid';
-  
-  if (!window.studio?.stashList) return;
-  
-  window.studio.stashList().then(r => {
-    const items = (r.items || []).filter(i => i.folderId === folderId);
-    items.forEach(it => {
-      grid.appendChild(createStashCard(it));
-    });
-    tree.appendChild(grid);
-  });
-}
 
 async function openStashView(id) {
   if (!window.studio?.stashGetFull) return;
@@ -1705,7 +1763,8 @@ async function addSvgToStash(svgText) {
       kind: 'svg',
       svgText: svgText,
       sourceText: '',
-      label: `SVG 产出物 ${new Date().toLocaleString('zh-CN')}`
+      label: `SVG 产出物 ${new Date().toLocaleString('zh-CN')}`,
+      projectName: deriveStashProjectName(selectedProjectRoot),
     });
     
     if (!r?.ok) {
@@ -1732,7 +1791,8 @@ async function addPngToStashFromBlob(blob) {
       kind: 'png',
       arrayBuffer: arrayBuffer,
       sourceText: '',
-      label: `PNG 产出物 ${new Date().toLocaleString('zh-CN')}`
+      label: `PNG 产出物 ${new Date().toLocaleString('zh-CN')}`,
+      projectName: deriveStashProjectName(selectedProjectRoot),
     });
     
     if (!r?.ok) {
@@ -1828,15 +1888,6 @@ function closeAgentSettingsDialog() {
   $('agent-settings-dialog')?.close();
 }
 
-async function createStashFolder() {
-  const dlg = $('stash-folder-dialog');
-  const nameInput = $('stash-folder-name');
-  nameInput.value = '';
-  dlg.showModal();
-  requestAnimationFrame(() => {
-    nameInput.focus();
-  });
-}
 
 async function confirmCreateStashFolder() {
   const dlg = $('stash-folder-dialog');
@@ -1927,8 +1978,8 @@ async function loadAgentForm() {
     $('cfg-base-url').value = c.baseUrl || '';
     $('cfg-model').value = c.model || '';
     $('cfg-max-retries').value = String(c.maxRetries ?? 3);
-    const rv = $('cfg-reference-vision-rounds');
-    if (rv) rv.value = String(c.referenceVisionMaxRounds ?? 2);
+    const autoSt = $('cfg-auto-stash');
+    if (autoSt) autoSt.checked = c.autoStashOnGenerate !== false;
     const qwk = $('cfg-qwen-api-key');
     const qwu = $('cfg-qwen-base-url');
     const qwm = $('cfg-qwen-vision-model');
@@ -1959,12 +2010,12 @@ async function saveAgentForm() {
       baseUrl: $('cfg-base-url').value,
       model: $('cfg-model').value,
       maxRetries: Number($('cfg-max-retries').value),
-      referenceVisionMaxRounds: Number($('cfg-reference-vision-rounds')?.value ?? 2),
       qwenApiKey: $('cfg-qwen-api-key')?.value ?? '',
       qwenBaseUrl: $('cfg-qwen-base-url')?.value ?? '',
       qwenVisionModel: $('cfg-qwen-vision-model')?.value ?? '',
       projectIgnoreGlobs: projectIgnoreGlobsValue(),
       chinaUnivMode: chinaFromUi,
+      autoStashOnGenerate: Boolean($('cfg-auto-stash')?.checked),
     });
     if (r && r.ok === false) {
       setStatus(r.error || '未授权：请先在菜单「帮助 → 授权激活」中完成激活后再保存。', false);
@@ -2040,6 +2091,7 @@ async function applyAgentRunResult(r) {
     if (r.ok) {
       setStatus(isArchDraft ? '静态架构草稿已填入，正在渲染预览…' : '智能生成成功，正在刷新预览…', true);
       await render();
+      await maybeAutoStashAfterAgentSuccess();
     } else {
       setStatus(r.error || '智能生成未通过校验', false);
       showErrors(
@@ -2098,7 +2150,7 @@ async function runAgent() {
     return;
   }
   const busyHint = refPayload.length
-    ? '通义千问正在理解参考图，DeepSeek 生成 PlantUML，随后进行视觉比对闭环…'
+    ? '通义千问正在理解附图，随后由 DeepSeek 生成 PlantUML…'
     : 'DeepSeek 正在生成 PlantUML…';
   setStatus('DeepSeek 编排运行中…', null);
   beginStudioBusy(busyHint);
@@ -2124,7 +2176,6 @@ async function runAgent() {
     showToast(msg, 'error');
     reportErrorArchive('agent-exception', msg);
   } finally {
-    clearAttachedReferenceImages();
     endStudioBusy();
     void refreshEditionUi();
   }
@@ -2360,6 +2411,7 @@ function wireAppDialogs() {
   });
 
   $('session-log-dialog-close')?.addEventListener('click', () => $('session-log-dialog')?.close());
+  $('help-plantuml-close')?.addEventListener('click', () => $('help-plantuml-dialog')?.close());
   $('error-log-dialog-close')?.addEventListener('click', () => $('error-log-dialog')?.close());
   $('project-imported-ok')?.addEventListener('click', () => $('project-imported-dialog')?.close());
   $('project-imported-close-x')?.addEventListener('click', () => $('project-imported-dialog')?.close());
@@ -2638,7 +2690,7 @@ function init() {
   $('btn-edit-mode')?.addEventListener('click', () => toggleEditMode());
 
   $('btn-stash-refresh').addEventListener('click', () => refreshStashList());
-  $('btn-stash-new-folder').addEventListener('click', () => createStashFolder());
+  /* 暂存区按项目/日期自动归档 */
   $('btn-stash-select-all').addEventListener('click', () => {
     document.querySelectorAll('.stash-item-cb').forEach((cb) => {
       cb.checked = true;
@@ -2687,6 +2739,9 @@ function init() {
   }
   if (window.studio?.onMenuErrorLog) {
     window.studio.onMenuErrorLog(() => void openErrorLogDialog());
+  }
+  if (window.studio?.onMenuPlantumlGuide) {
+    window.studio.onMenuPlantumlGuide(() => void openHelpPlantumlDialog());
   }
 
   wireAppDialogs();
@@ -2847,7 +2902,7 @@ async function refreshDeviceInfo() {
   try {
     const info = await window.studio.licenseGetDeviceInfo();
     if (info.ok) {
-      $('license-hw-id').textContent = info.hwId || info.shortHwId;
+      $('license-hw-id').textContent = info.shortHwId;
       $('license-device-code').textContent = info.deviceCode;
     } else {
       $('license-hw-id').textContent = '获取失败';
@@ -2956,18 +3011,6 @@ function wireLicenseDialog() {
   $('license-dialog-close').addEventListener('click', () => dlg.close());
   dlg.addEventListener('click', (ev) => {
     if (ev.target === dlg) dlg.close();
-  });
-
-  $('btn-license-copy-hw-id')?.addEventListener('click', async () => {
-    const hw = $('license-hw-id')?.textContent?.trim();
-    if (!hw || hw === '获取失败' || hw === '异常') return;
-    try {
-      if (window.studio?.copyText) await window.studio.copyText(hw);
-      else await navigator.clipboard.writeText(hw);
-      setStatus('已复制完整 HW_ID', true);
-    } catch {
-      setStatus('复制失败', false);
-    }
   });
 
   $('btn-license-copy-device-code').addEventListener('click', async () => {

@@ -216,6 +216,8 @@ const DEFAULT_AGENT = {
   qwenVisionModel: 'qwen-vl-plus',
   /** 参考图视觉闭环：首版渲染后与参考图比对，最多额外修正轮数（0=关闭） */
   referenceVisionMaxRounds: AGENT_REFERENCE_VISION_MAX_ROUNDS_DEFAULT,
+  /** 智能生成成功后自动写入产出物暂存区 */
+  autoStashOnGenerate: true,
 };
 
 function agentConfigPath() {
@@ -257,6 +259,7 @@ function loadAgentConfig() {
       referenceVisionMaxRounds: Number.isFinite(Number(j.referenceVisionMaxRounds))
         ? Math.max(0, Math.min(5, Number(j.referenceVisionMaxRounds)))
         : DEFAULT_AGENT.referenceVisionMaxRounds,
+      autoStashOnGenerate: j.autoStashOnGenerate === false || j.autoStashOnGenerate === 'false' ? false : true,
     };
   } catch {
     return { ...DEFAULT_AGENT };
@@ -286,6 +289,10 @@ function saveAgentConfig(partial) {
       partial.referenceVisionMaxRounds != null
         ? Math.max(0, Math.min(5, Number(partial.referenceVisionMaxRounds) || 0))
         : cur.referenceVisionMaxRounds,
+    autoStashOnGenerate:
+      partial.autoStashOnGenerate != null
+        ? !(partial.autoStashOnGenerate === false || partial.autoStashOnGenerate === 'false')
+        : cur.autoStashOnGenerate,
   };
   if (partial.apiKey !== undefined) next.apiKey = String(partial.apiKey);
   if (partial.qwenApiKey !== undefined) next.qwenApiKey = sanitizeQwenApiKey(partial.qwenApiKey);
@@ -2365,6 +2372,8 @@ function showExitConfirmDialog() {
 
 /* ---------- 产出物暂存区（用户目录持久化） ---------- */
 
+const STASH_DEFAULT_PROJECT = '默认项目';
+
 function stashRoot() {
   return join(app.getPath('userData'), 'output-stash');
 }
@@ -2377,8 +2386,65 @@ function stashManifestPath() {
   return join(stashRoot(), 'manifest.json');
 }
 
+function sanitizeStashSegment(name) {
+  const seg = String(name ?? '')
+    .trim()
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+    .replace(/\.+$/g, '')
+    .replace(/\s+/g, ' ');
+  return (seg || STASH_DEFAULT_PROJECT).slice(0, 72);
+}
+
+function stashDateKeyFromTs(ts) {
+  const d = new Date(Number(ts) || Date.now());
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** @param {{ id: string, storageDir?: string }} meta */
+function resolveStashItemDir(meta) {
+  if (meta?.storageDir) return join(stashRoot(), meta.storageDir);
+  return stashItemsDir();
+}
+
+/** @param {{ id: string, storageDir?: string }} meta */
+function stashPngPathFor(meta) {
+  return join(resolveStashItemDir(meta), `${meta.id}.png`);
+}
+
+/** @param {{ id: string, storageDir?: string }} meta */
+function stashSvgPathFor(meta) {
+  return join(resolveStashItemDir(meta), `${meta.id}.svg`);
+}
+
+/** @param {{ id: string, storageDir?: string }} meta */
+function stashThumbPathFor(meta) {
+  return join(resolveStashItemDir(meta), `${meta.id}.thumb.png`);
+}
+
+/** @param {{ id: string, storageDir?: string }} meta */
+function stashPumlPathFor(meta) {
+  return join(resolveStashItemDir(meta), `${meta.id}.puml`);
+}
+
+function stashPngPath(id) {
+  return join(stashItemsDir(), `${id}.png`);
+}
+
+function stashSvgPath(id) {
+  return join(stashItemsDir(), `${id}.svg`);
+}
+
+function stashThumbPath(id) {
+  return join(stashItemsDir(), `${id}.thumb.png`);
+}
+
+function stashPumlPath(id) {
+  return join(stashItemsDir(), `${id}.puml`);
+}
+
 function ensureStashDirs() {
   mkdirSync(stashItemsDir(), { recursive: true });
+  mkdirSync(join(stashRoot(), 'archive'), { recursive: true });
 }
 
 function readStashManifest() {
@@ -2398,26 +2464,20 @@ function writeStashManifest(items) {
   writeFileSync(stashManifestPath(), JSON.stringify({ items }, null, 2), 'utf8');
 }
 
-function stashPngPath(id) {
-  return join(stashItemsDir(), `${id}.png`);
-}
-
-function stashSvgPath(id) {
-  return join(stashItemsDir(), `${id}.svg`);
-}
-
-function stashThumbPath(id) {
-  return join(stashItemsDir(), `${id}.thumb.png`);
-}
-
-function stashPumlPath(id) {
-  return join(stashItemsDir(), `${id}.puml`);
-}
-
-function removeStashFiles(id) {
-  for (const p of [stashPngPath(id), stashSvgPath(id), stashThumbPath(id), stashPumlPath(id)]) {
+function removeStashFiles(meta) {
+  const m = meta && typeof meta === 'object' ? meta : { id: String(meta || '') };
+  for (const p of [
+    stashPngPathFor(m),
+    stashSvgPathFor(m),
+    stashThumbPathFor(m),
+    stashPumlPathFor(m),
+    stashPngPath(m.id),
+    stashSvgPath(m.id),
+    stashThumbPath(m.id),
+    stashPumlPath(m.id),
+  ]) {
     try {
-      if (existsSync(p)) unlinkSync(p);
+      if (p && existsSync(p)) unlinkSync(p);
     } catch {
       /* ignore */
     }
@@ -2430,12 +2490,23 @@ function pruneStashManifest() {
   items = items.filter((m) => {
     if (!m?.id) return false;
     const ok =
-      (m.kind === 'png' && existsSync(stashPngPath(m.id))) ||
-      (m.kind === 'svg' && existsSync(stashSvgPath(m.id)));
+      (m.kind === 'png' && (existsSync(stashPngPathFor(m)) || existsSync(stashPngPath(m.id)))) ||
+      (m.kind === 'svg' && (existsSync(stashSvgPathFor(m)) || existsSync(stashSvgPath(m.id))));
     return ok;
   });
   if (items.length !== before) writeStashManifest(items);
   return items;
+}
+
+function findPlantumlQuickGuidePath() {
+  const candidates = [
+    join(process.resourcesPath || '', 'kb', 'PlantUML-Quick-Start-ZH.md'),
+    join(__dirname, 'vendor', 'kb', 'PlantUML-Quick-Start-ZH.md'),
+  ];
+  for (const cand of candidates) {
+    if (cand && existsSync(cand)) return cand;
+  }
+  return null;
 }
 
 /* ---------- 错误日志归档（用户目录 JSONL，供「文件 → 查看错误日志」） ---------- */
@@ -2875,6 +2946,17 @@ function registerIpcHandlers() {
     }
   });
 
+  ipcMain.handle('studio:help-plantuml-guide', () => {
+    try {
+      const p = findPlantumlQuickGuidePath();
+      if (!p) return { ok: false, error: '未找到 PlantUML 语法速查文档' };
+      const markdown = readFileSync(p, 'utf8');
+      return { ok: true, markdown };
+    } catch (e) {
+      return { ok: false, error: String(e.message || e) };
+    }
+  });
+
   ipcMain.handle('studio:stash-list', () => {
     const snap = getEntitlementSnapshot();
     const gate = gateFromSnapshot(snap);
@@ -2907,36 +2989,45 @@ function registerIpcHandlers() {
           hour12: false,
         })}`;
       const sourceText = payload?.sourceText != null ? String(payload.sourceText) : '';
+      const createdAt = Date.now();
+      const projectName = sanitizeStashSegment(payload?.projectName || STASH_DEFAULT_PROJECT);
+      const dateKey = stashDateKeyFromTs(createdAt);
+      const storageDir = join('archive', projectName, dateKey);
+      mkdirSync(join(stashRoot(), storageDir), { recursive: true });
+      const fileMeta = { id, storageDir };
 
       if (kind === 'png') {
         const buf = Buffer.from(new Uint8Array(payload?.arrayBuffer || []));
         if (!buf.length) return { ok: false, error: 'PNG 数据为空' };
-        writeFileSync(stashPngPath(id), buf);
+        writeFileSync(stashPngPathFor(fileMeta), buf);
         try {
           const ni = nativeImage.createFromBuffer(buf);
           const thumb = ni.resize({ width: 168 });
           const tb = thumb.toPNG();
-          if (tb && tb.length) writeFileSync(stashThumbPath(id), tb);
+          if (tb && tb.length) writeFileSync(stashThumbPathFor(fileMeta), tb);
         } catch {
           /* 略过缩略图 */
         }
       } else {
         const svg = String(payload?.svgText || '');
         if (!svg.trim()) return { ok: false, error: 'SVG 内容为空' };
-        writeFileSync(stashSvgPath(id), svg, 'utf8');
+        writeFileSync(stashSvgPathFor(fileMeta), svg, 'utf8');
       }
 
       if (sourceText.length) {
-        writeFileSync(stashPumlPath(id), sourceText.slice(0, 250000), 'utf8');
+        writeFileSync(stashPumlPathFor(fileMeta), sourceText.slice(0, 250000), 'utf8');
       }
 
       const items = readStashManifest();
       items.unshift({
         id,
-        createdAt: Date.now(),
+        createdAt,
         kind,
         label,
         hasPuml: Boolean(sourceText.length),
+        projectName,
+        dateKey,
+        storageDir,
       });
       writeStashManifest(items);
       maybeConsumeFreeAfterSuccess(snap);
@@ -2955,7 +3046,7 @@ function registerIpcHandlers() {
       if (!idSet.size) return { ok: false, error: '未选择条目' };
       const kept = readStashManifest().filter((m) => {
         if (idSet.has(m.id)) {
-          removeStashFiles(m.id);
+          removeStashFiles(m);
           return false;
         }
         return true;
@@ -2979,10 +3070,10 @@ function registerIpcHandlers() {
       const meta = items.find((x) => x.id === sid);
       if (!meta) return { ok: false, error: '条目不存在' };
       if (meta.kind === 'png') {
-        const p = stashPngPath(sid);
+        const p = existsSync(stashPngPathFor(meta)) ? stashPngPathFor(meta) : stashPngPath(sid);
         if (!existsSync(p)) return { ok: false, error: '文件缺失' };
         const b = readFileSync(p);
-        const pp = stashPumlPath(sid);
+        const pp = existsSync(stashPumlPathFor(meta)) ? stashPumlPathFor(meta) : stashPumlPath(sid);
         let sourceText = '';
         if (existsSync(pp)) {
           try {
@@ -3002,10 +3093,10 @@ function registerIpcHandlers() {
         maybeConsumeFreeAfterSuccess(snap);
         return out;
       }
-      const sp = stashSvgPath(sid);
+      const sp = existsSync(stashSvgPathFor(meta)) ? stashSvgPathFor(meta) : stashSvgPath(sid);
       if (!existsSync(sp)) return { ok: false, error: '文件缺失' };
       const svgText = readFileSync(sp, 'utf8');
-      const pp = stashPumlPath(sid);
+      const pp = existsSync(stashPumlPathFor(meta)) ? stashPumlPathFor(meta) : stashPumlPath(sid);
       let sourceText = '';
       if (existsSync(pp)) {
         try {
@@ -3041,7 +3132,7 @@ function registerIpcHandlers() {
       const meta = items.find((x) => x.id === sid);
       if (!meta) return { ok: false, error: '条目不存在' };
       if (meta.kind === 'png') {
-        const p = stashPngPath(sid);
+        const p = existsSync(stashPngPathFor(meta)) ? stashPngPathFor(meta) : stashPngPath(sid);
         if (!existsSync(p)) return { ok: false, error: '文件缺失' };
         const buf = readFileSync(p);
         const img = nativeImage.createFromBuffer(buf);
