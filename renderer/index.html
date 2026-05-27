@@ -81,66 +81,79 @@
                 删除当前
               </button>
             </div>
-            <div class="agent-skills-row" id="agent-skills-anchor">
-              <button
-                type="button"
-                id="btn-agent-skills"
-                class="ghost agent-skills-btn"
-                title="插入制图技能短语；开启「国内高校模式」时预设图类会排在列表前"
-                aria-expanded="false"
-                aria-controls="agent-skills-popover"
-              >
-                + 制图技能
-              </button>
-              <span class="agent-skills-hint">空行开头输入「/」同样可唤出列表</span>
-              <input
-                type="file"
-                id="agent-ref-image-input"
-                class="hidden"
-                accept="image/jpeg,image/png,image/webp,image/gif"
-                multiple
-                aria-label="选择参考图"
-              />
-              <div
-                id="agent-skills-popover"
-                class="agent-skills-popover hidden"
-                role="listbox"
-                aria-label="制图技能与效果示意"
-              ></div>
-            </div>
-            <div class="agent-ref-images" aria-label="参考图上传">
-              <div class="agent-ref-images__row">
-                <button type="button" id="btn-agent-ref-image" class="ghost agent-ref-btn">
-                  + 参考图（通义千问）
-                </button>
-                <span class="agent-ref-images__hint">至多 4 张，单张 ≤ 2MB；先写需求再选图也可</span>
+            <div class="agent-compose" id="agent-compose" aria-label="智能生成输入区">
+              <div class="agent-compose__top">
+                <div id="agent-skill-chips" class="agent-skill-chips" role="list" aria-label="已选制图能力"></div>
+                <div id="agent-ref-image-previews" class="agent-ref-previews" aria-live="polite"></div>
+                <p class="agent-compose__ref-hint">
+                  参考图至多 4 张、单张 ≤ 2MB；可点击「+」选图或使用 <kbd>Ctrl</kbd>+<kbd>V</kbd> 粘贴截图。空行输入「<span aria-hidden="true">/</span>」可唤出制图技能列表。
+                </p>
               </div>
-              <div id="agent-ref-image-previews" class="agent-ref-previews" aria-live="polite"></div>
-            </div>
-            <div class="agent-compose" aria-label="智能生成输入区">
-              <div id="agent-skill-chips" class="agent-skill-chips" role="list" aria-label="已选制图能力"></div>
               <textarea
                 id="agent-request"
                 class="agent-compose__field"
                 rows="5"
                 spellcheck="false"
                 title="最多 3000 字（含技能片段）；超出会在输入或粘贴后自动截断并提示"
-                placeholder="例如：在用户登录分支中补充「验证码错误」处理…"
+                placeholder="输入需求或对参考图的说明…"
               ></textarea>
               <div class="agent-compose__footer">
-                <p id="agent-request-hint" class="agent-request-hint" aria-live="polite"></p>
+                <div class="agent-compose__toolbar">
+                  <div class="agent-insert-anchor" id="agent-insert-anchor">
+                    <input
+                      type="file"
+                      id="agent-ref-image-input"
+                      class="hidden"
+                      accept="image/jpeg,image/png,image/webp,image/gif"
+                      multiple
+                      aria-label="选择参考图"
+                    />
+                    <button
+                      type="button"
+                      id="btn-agent-insert"
+                      class="agent-insert-btn"
+                      title="插入制图技能或参考图；空行开头输入「/」同样可唤出技能列表（开启「国内高校模式」时预设图类会排在列表前）"
+                      aria-haspopup="menu"
+                      aria-expanded="false"
+                      aria-controls="agent-insert-menu"
+                    >
+                      <span class="agent-insert-btn__glyph" aria-hidden="true">+</span>
+                    </button>
+                    <div id="agent-insert-menu" class="agent-insert-menu hidden" role="menu" aria-label="插入内容">
+                      <button type="button" class="agent-insert-menu__item" id="agent-insert-option-skills" role="menuitem">
+                        制图技能…
+                      </button>
+                      <button type="button" class="agent-insert-menu__item" id="agent-insert-option-ref" role="menuitem">
+                        参考图…
+                      </button>
+                    </div>
+                    <div
+                      id="agent-skills-popover"
+                      class="agent-skills-popover hidden"
+                      role="listbox"
+                      aria-label="制图技能与效果示意"
+                    ></div>
+                  </div>
+                  <p id="agent-request-hint" class="agent-request-hint agent-request-hint--toolbar" aria-live="polite"></p>
+                  <button
+                    type="button"
+                    id="btn-agent-run"
+                    class="agent-compose-send"
+                    title="路由：有项目目录时由 DeepSeek 判别是否读仓库；通过后进入项目制图（规划选文件 + 读摘要）。路由失败时回退规则。"
+                    aria-label="智能生成 PlantUML"
+                  >
+                    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" class="agent-compose-send__icon">
+                      <path
+                        fill="currentColor"
+                        d="M4.01 17.72L19.93 11 4 4.56v7.23l11.61 2.21L4.01 10.72v7z"
+                      />
+                    </svg>
+                  </button>
+                </div>
               </div>
             </div>
             <p class="agent-nl-routing-hint hidden" aria-hidden="true"></p>
             <div class="agent-nl-actions">
-              <button
-                type="button"
-                id="btn-agent-run"
-                class="primary"
-                title="路由：有项目目录时由 DeepSeek 判别是否读仓库；通过后进入项目制图（规划选文件 + 读摘要）。路由失败时回退规则。"
-              >
-                智能生成 PlantUML
-              </button>
               <button type="button" id="btn-agent-arch-draft" class="ghost" title="独立知识库；输出 @studio-arch YAML，本地渲染黑白灰 SVG">
                 生成 @studio-arch 草稿
               </button>

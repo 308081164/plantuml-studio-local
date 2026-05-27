@@ -452,36 +452,42 @@ button:hover {
   background: var(--surface);
 }
 
-/* 参考图：通义 VL 预处理 */
-.agent-ref-images {
-  margin: 0.15rem 0 0.2rem;
-}
+/* 参考图预览（置顶于编排卡片顶部） */
 
-.agent-ref-images__row {
+.agent-compose__top {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.35rem 0.55rem;
+  flex-direction: column;
+  gap: 0.38rem;
+  padding-bottom: 0.42rem;
+  border-bottom: 1px solid rgba(208, 215, 222, 0.45);
 }
 
-.agent-ref-images__hint {
-  font-size: 0.67rem;
+.agent-compose__ref-hint {
+  margin: 0;
+  font-size: 0.66rem;
+  line-height: 1.48;
   color: var(--muted);
 }
 
-.agent-ref-btn {
-  font-size: 0.73rem !important;
+.agent-compose__ref-hint kbd {
+  font-size: 0.62rem;
+  font-family: inherit;
+  padding: 0.06rem 0.22rem;
+  border-radius: 4px;
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  background: rgba(248, 250, 252, 0.9);
+}
+
+.agent-compose__top .agent-ref-previews {
+  margin-top: 0;
 }
 
 .agent-ref-previews {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
-  margin-top: 0.38rem;
   min-height: 0;
 }
-
-.agent-ref-preview {
   position: relative;
   width: 4.6rem;
   height: 3.65rem;
@@ -520,7 +526,7 @@ button:hover {
   color: #cf222e;
 }
 
-/* 智能生成：整块输入卡片（配色参考现代对话产品） */
+/* 智能生成：整块输入卡片（参考移动端对话排版：媒体区在上、正文、底栏圆形操作） */
 .agent-compose {
   display: flex;
   flex-direction: column;
@@ -528,9 +534,11 @@ button:hover {
   padding: 0.45rem 0.5rem;
   margin: 0.15rem 0 0;
   border: 1px solid var(--border);
-  border-radius: 14px;
-  background: linear-gradient(180deg, rgba(248, 250, 255, 0.65) 0%, var(--editor-bg) 40%);
-  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
+  border-radius: 16px;
+  background: #f5f6f8;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    0 2px 12px rgba(15, 23, 42, 0.07);
 }
 
 .agent-skill-chips {
@@ -635,6 +643,111 @@ button:hover {
   border-top: 1px solid rgba(208, 215, 222, 0.45);
 }
 
+.agent-compose__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.45rem;
+  justify-content: space-between;
+}
+
+.agent-insert-anchor {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.agent-insert-btn {
+  width: 2.48rem;
+  height: 2.48rem;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(208, 213, 221, 0.95);
+  background: rgba(255, 255, 255, 0.88);
+  color: rgba(54, 60, 70, 0.95);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.agent-insert-btn:hover {
+  background: #fff;
+  border-color: rgba(148, 163, 184, 0.9);
+}
+
+.agent-insert-btn__glyph {
+  font-size: 1.58rem;
+  font-weight: 300;
+  line-height: 1;
+  margin-top: -0.06rem;
+}
+
+.agent-insert-menu {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  z-index: 62;
+  min-width: 10.8rem;
+  padding: 0.22rem;
+  margin: 0;
+  border-radius: 12px;
+  border: 1px solid rgba(208, 213, 221, 0.95);
+  background: var(--surface);
+  box-shadow: 0 10px 34px rgba(27, 31, 36, 0.16);
+}
+
+.agent-insert-menu.hidden {
+  display: none !important;
+}
+
+.agent-insert-menu__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin: 0;
+  padding: 0.5rem 0.62rem;
+  font: inherit;
+  font-size: 0.875rem;
+  color: inherit;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.agent-insert-menu__item:hover {
+  background: rgba(247, 248, 250, 0.98);
+}
+
+.agent-request-hint--toolbar {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.agent-compose-send {
+  flex: 0 0 auto;
+  width: 2.82rem;
+  height: 2.82rem;
+  padding: 0;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  background: rgb(54, 55, 60);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.18);
+}
+
+.agent-compose-send:hover {
+  background: rgb(40, 41, 45);
+}
+
+.agent-compose-send__icon {
+  margin-left: 0.06rem;
+  margin-top: 0.04rem;
+}
+
 .agent-compose .agent-request-hint {
   margin: 0;
   font-size: 0.68rem;
@@ -675,25 +788,6 @@ button:hover {
 .agent-chat-btn {
   font-size: 0.72rem !important;
   padding: 0.22rem 0.45rem !important;
-}
-
-.agent-skills-row {
-  position: relative;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.35rem 0.6rem;
-  margin: 0.2rem 0 0.3rem;
-}
-
-.agent-skills-btn {
-  font-size: 0.74rem !important;
-  padding: 0.2rem 0.5rem !important;
-}
-
-.agent-skills-hint {
-  font-size: 0.67rem;
-  color: var(--muted);
 }
 
 .agent-skills-popover {
@@ -818,7 +912,7 @@ button:hover {
 .agent-nl-actions {
   margin-top: 0.45rem;
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 
 .agent-nl-actions button {

@@ -266,12 +266,7 @@ async function ingestReferenceImageFiles(files) {
 
 function wireAgentReferenceImagesUi() {
   const inp = $('agent-ref-image-input');
-  const btn = $('btn-agent-ref-image');
-  if (!inp || !btn) return;
-
-  btn.addEventListener('click', () => {
-    inp.click();
-  });
+  if (!inp) return;
 
   inp.addEventListener('change', () => {
     const list = inp.files ? Array.from(inp.files) : [];
@@ -2366,8 +2361,67 @@ function wireAgentExpandAdvanced(elId) {
   });
 }
 
-/** Agent 制图技能（+/空行 "/"）插入片段 */
+/** Agent「+」菜单与制图技能（空行 "/" 唤出列表）插入片段 */
 let agentSkillsOpen = false;
+/** @type {boolean} */
+let agentInsertMenuOpen = false;
+
+function closeAgentInsertMenu() {
+  const btn = $('btn-agent-insert');
+  const menu = $('agent-insert-menu');
+  if (!agentInsertMenuOpen) return;
+  if (menu) menu.classList.add('hidden');
+  agentInsertMenuOpen = false;
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+  document.removeEventListener('mousedown', agentInsertOutsideClose, true);
+}
+
+/** @param {MouseEvent} ev */
+function agentInsertOutsideClose(ev) {
+  const anchor = $('agent-insert-anchor');
+  if (anchor?.contains(/** @type {Node} */ (ev.target))) return;
+  closeAgentInsertMenu();
+}
+
+function toggleAgentInsertMenu() {
+  if (agentSkillsOpen) closeAgentSkillsPopover();
+  if (agentInsertMenuOpen) {
+    closeAgentInsertMenu();
+    return;
+  }
+  const menu = $('agent-insert-menu');
+  const btn = $('btn-agent-insert');
+  if (!menu || !btn) return;
+  menu.classList.remove('hidden');
+  agentInsertMenuOpen = true;
+  btn.setAttribute('aria-expanded', 'true');
+  setTimeout(() => document.addEventListener('mousedown', agentInsertOutsideClose, true), 0);
+}
+
+/** 在编排卡片内 Ctrl+V：从剪贴板追加参考图（与文件选择链路一致）。 */
+function wireAgentComposePasteImages() {
+  const wrap = $('agent-compose');
+  if (!wrap) return;
+  wrap.addEventListener(
+    'paste',
+    /** @param {ClipboardEvent} ev */ (ev) => {
+      const dt = ev.clipboardData;
+      if (!dt?.items?.length) return;
+      /** @type {File[]} */
+      const imageFiles = [];
+      for (let i = 0; i < dt.items.length; i++) {
+        const item = dt.items[i];
+        if (item.kind !== 'file') continue;
+        const f = item.getAsFile();
+        if (!f || !/^image\//i.test(String(f.type || '').trim())) continue;
+        imageFiles.push(f);
+      }
+      if (!imageFiles.length) return;
+      ev.preventDefault();
+      void ingestReferenceImageFiles(imageFiles);
+    },
+  );
+}
 
 function rebuildAgentSkillsOptions() {
   const pop = $('agent-skills-popover');
@@ -2409,41 +2463,50 @@ function rebuildAgentSkillsOptions() {
 
 function openAgentSkillsPopover() {
   const pop = $('agent-skills-popover');
-  const btn = $('btn-agent-skills');
   if (!pop || agentSkillsOpen) return;
+  closeAgentInsertMenu();
   rebuildAgentSkillsOptions();
   pop.classList.remove('hidden');
   agentSkillsOpen = true;
-  if (btn) btn.setAttribute('aria-expanded', 'true');
   setTimeout(() => document.addEventListener('mousedown', agentSkillsOutsideClose, true), 0);
 }
 
 /** @param {MouseEvent} ev */
 function agentSkillsOutsideClose(ev) {
-  const anchor = $('agent-skills-anchor');
+  const anchor = $('agent-insert-anchor');
   if (anchor?.contains(ev.target)) return;
   closeAgentSkillsPopover();
 }
 
 function closeAgentSkillsPopover() {
   const pop = $('agent-skills-popover');
-  const btn = $('btn-agent-skills');
   if (!agentSkillsOpen) return;
   if (pop) pop.classList.add('hidden');
   agentSkillsOpen = false;
-  if (btn) btn.setAttribute('aria-expanded', 'false');
   document.removeEventListener('mousedown', agentSkillsOutsideClose, true);
 }
 
 function wireAgentDrawingSkillsUi() {
-  const btn = $('btn-agent-skills');
   const ta = $('agent-request');
-  if (!btn || !ta) return;
-  btn.addEventListener('click', (e) => {
+  if (!ta) return;
+
+  $('btn-agent-insert')?.addEventListener('click', (e) => {
     e.preventDefault();
-    if (agentSkillsOpen) closeAgentSkillsPopover();
-    else openAgentSkillsPopover();
+    toggleAgentInsertMenu();
   });
+
+  $('agent-insert-option-skills')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    closeAgentInsertMenu();
+    openAgentSkillsPopover();
+  });
+
+  $('agent-insert-option-ref')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    closeAgentInsertMenu();
+    $('agent-ref-image-input')?.click();
+  });
+
   ta.addEventListener('keydown', (e) => {
     if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
     const target = /** @type {HTMLElement} */ (e.target);
@@ -2457,8 +2520,9 @@ function wireAgentDrawingSkillsUi() {
     else openAgentSkillsPopover();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape' || !agentSkillsOpen) return;
-    closeAgentSkillsPopover();
+    if (e.key !== 'Escape') return;
+    if (agentInsertMenuOpen) closeAgentInsertMenu();
+    else if (agentSkillsOpen) closeAgentSkillsPopover();
   });
 }
 
@@ -2481,6 +2545,7 @@ function init() {
   $('china-univ-mode')?.addEventListener('change', () => void onChinaUnivModeToggle());
   wireAgentDrawingSkillsUi();
   wireAgentReferenceImagesUi();
+  wireAgentComposePasteImages();
   renderAgentSkillChips();
 
   $('source').value = DEFAULT_SOURCE;
