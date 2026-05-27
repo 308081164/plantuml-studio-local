@@ -1927,6 +1927,8 @@ async function loadAgentForm() {
     $('cfg-base-url').value = c.baseUrl || '';
     $('cfg-model').value = c.model || '';
     $('cfg-max-retries').value = String(c.maxRetries ?? 3);
+    const rv = $('cfg-reference-vision-rounds');
+    if (rv) rv.value = String(c.referenceVisionMaxRounds ?? 2);
     const qwk = $('cfg-qwen-api-key');
     const qwu = $('cfg-qwen-base-url');
     const qwm = $('cfg-qwen-vision-model');
@@ -1957,6 +1959,7 @@ async function saveAgentForm() {
       baseUrl: $('cfg-base-url').value,
       model: $('cfg-model').value,
       maxRetries: Number($('cfg-max-retries').value),
+      referenceVisionMaxRounds: Number($('cfg-reference-vision-rounds')?.value ?? 2),
       qwenApiKey: $('cfg-qwen-api-key')?.value ?? '',
       qwenBaseUrl: $('cfg-qwen-base-url')?.value ?? '',
       qwenVisionModel: $('cfg-qwen-vision-model')?.value ?? '',
@@ -2095,7 +2098,7 @@ async function runAgent() {
     return;
   }
   const busyHint = refPayload.length
-    ? '通义千问正在理解附图，随后由 DeepSeek 生成 PlantUML…'
+    ? '通义千问正在理解参考图，DeepSeek 生成 PlantUML，随后进行视觉比对闭环…'
     : 'DeepSeek 正在生成 PlantUML…';
   setStatus('DeepSeek 编排运行中…', null);
   beginStudioBusy(busyHint);

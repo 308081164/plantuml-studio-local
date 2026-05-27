@@ -86,7 +86,7 @@
                 <div id="agent-skill-chips" class="agent-skill-chips" role="list" aria-label="已选制图能力"></div>
                 <div id="agent-ref-image-previews" class="agent-ref-previews" aria-live="polite"></div>
                 <p class="agent-compose__ref-hint">
-                  参考图至多 4 张、单张 ≤ 2MB；缩略图右上角 × 可移除，点击缩略图可放大。可「+」选图或 <kbd>Ctrl</kbd>+<kbd>V</kbd> 粘贴。空行输入「<span aria-hidden="true">/</span>」可唤出制图技能列表。
+                  参考图至多 4 张、单张 ≤ 2MB；可点击「+」选图或使用 <kbd>Ctrl</kbd>+<kbd>V</kbd> 粘贴截图。空行输入「<span aria-hidden="true">/</span>」可唤出制图技能列表。
                 </p>
               </div>
               <textarea
@@ -302,7 +302,7 @@
         </div>
         <div class="agent-settings-hint">
           <p>
-            PlantUML 制图仍由 <strong>DeepSeek</strong> 完成；勾选「参考图」时，会先经 <strong>阿里云通义千问 VL</strong> 将图片转为结构化文字说明，再与需求合并后送入 DeepSeek。千问 Key 在
+            PlantUML 制图仍由 <strong>DeepSeek</strong> 完成；勾选「参考图」时，会先经 <strong>阿里云通义千问 VL</strong> 将图片转为结构化文字说明，再与需求合并后送入 DeepSeek；首版渲染后还可开启<strong>视觉闭环</strong>（千问比对参考图与渲染图 → DeepSeek 修订）。千问 Key 在
             <a href="https://help.aliyun.com/zh/dashscope/" rel="noreferrer" target="_blank">DashScope 控制台</a>
             获取。若出现 401，请确认 Key 与 Base URL 区域一致（北京 Key 用
             <code>dashscope.aliyuncs.com</code>，新加坡 Key 用 <code>dashscope-intl.aliyuncs.com</code>），且勿与 DeepSeek Key 混用。
@@ -432,9 +432,8 @@
         <div id="license-device-area" class="license-device-area hidden">
           <div class="license-section-title">设备信息</div>
           <div class="license-device-row">
-            <span class="license-device-label">设备指纹 (HW_ID，完整 64 位)：</span>
+            <span class="license-device-label">设备指纹 (HW_ID)：</span>
             <code id="license-hw-id" class="license-device-value"></code>
-            <button type="button" id="btn-license-copy-hw-id" class="ghost" title="复制完整 HW_ID">复制</button>
           </div>
           <div class="license-device-row">
             <span class="license-device-label">激活设备码：</span>
@@ -444,7 +443,7 @@
           <p class="license-hint">
             未激活时，每台电脑每个自然日可使用 <strong>12 次免费用量</strong>使用专业相关能力（成功执行的操作计次，次日自动重置）。正式激活或月度核销后不受该上限约束。
           </p>
-          <p class="license-hint">请将<strong>激活设备码</strong>与<strong>完整 HW_ID</strong>一并提供给管理员（勿仅提供 HW_ID 前 16 位缩写）。</p>
+          <p class="license-hint">请将以上激活设备码提供给管理员，管理员将为您生成软件激活码。</p>
         </div>
         <div id="license-activate-area" class="license-activate-area hidden">
           <div class="license-section-title">月度解锁（一次性密钥 · 服务器核销）</div>
@@ -498,8 +497,5 @@
     <div id="studio-toast" class="studio-toast hidden" role="status"></div>
     <script src="./mxgraph-editor.js"></script>
     <script src="./app.js" type="module"></script>
-    <dialog id="agent-ref-viewer-dialog" class="agent-ref-viewer-dialog" aria-label="参考图预览">
-      <img id="agent-ref-viewer-img" alt="参考图大图" />
-    </dialog>
   </body>
 </html>

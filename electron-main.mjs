@@ -66,6 +66,15 @@ import {
 } from './scripts/agent-intent.mjs';
 import { buildArchAgentSystemPrompt } from './scripts/arch-agent-prompt.mjs';
 import { buildKnowledgeInjection, resolveJarLabelFromDirs } from './scripts/kb-inject.mjs';
+import {
+  buildVisionAnalysisSystemPrompt,
+  buildVisualFixUserContent,
+  QWEN_VISION_COMPARE_SYSTEM,
+  readVisionKbExcerptFromCandidates,
+  shouldContinueVisualCorrection,
+  visionKbCandidatePaths,
+  VISUAL_FIX_DEEPSEEK_APPEND,
+} from './scripts/reference-vision-pipeline.mjs';
 import { parseEditorDocument } from './scripts/diagram-grammar.mjs';
 import { stripChinaUnivActivityStartEndStereotypes } from './scripts/china-univ-activity-sanitize.mjs';
 import { renderStudioArchSvg } from './scripts/studio-arch-graph.mjs';
@@ -96,6 +105,12 @@ const AGENT_QWEN_REF_IMAGES_MAX = 4;
 
 /** Base64 解码后单图上限（IPC 与安全） */
 const AGENT_QWEN_REF_IMAGE_BYTES_MAX = 2 * 1024 * 1024;
+
+/** 参考图视觉闭环默认轮数（渲染后千问比对 → DeepSeek 修订） */
+const AGENT_REFERENCE_VISION_MAX_ROUNDS_DEFAULT = 2;
+
+/** 每轮视觉修订后，PlantUML 语法校验额外重试次数 */
+const AGENT_REFERENCE_VISION_SYNTAX_RETRIES = 2;
 
 /** 多轮对话：注入 DeepSeek 的历史条数上限（user/assistant 交替） */
 const MAX_AGENT_CHAT_MESSAGES = 16;
@@ -199,6 +214,8 @@ const DEFAULT_AGENT = {
   qwenBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
   /** 建议使用支持视觉能力的模型（如 qwen-vl-max / qwen-vl-plus；以控制台可用名为准） */
   qwenVisionModel: 'qwen-vl-plus',
+  /** 参考图视觉闭环：首版渲染后与参考图比对，最多额外修正轮数（0=关闭） */
+  referenceVisionMaxRounds: AGENT_REFERENCE_VISION_MAX_ROUNDS_DEFAULT,
 };
 
 function agentConfigPath() {
@@ -237,6 +254,9 @@ function loadAgentConfig() {
         typeof j.qwenVisionModel === 'string' && j.qwenVisionModel.trim()
           ? j.qwenVisionModel.trim()
           : DEFAULT_AGENT.qwenVisionModel,
+      referenceVisionMaxRounds: Number.isFinite(Number(j.referenceVisionMaxRounds))
+        ? Math.max(0, Math.min(5, Number(j.referenceVisionMaxRounds)))
+        : DEFAULT_AGENT.referenceVisionMaxRounds,
     };
   } catch {
     return { ...DEFAULT_AGENT };
@@ -262,6 +282,10 @@ function saveAgentConfig(partial) {
       partial.qwenVisionModel != null
         ? String(partial.qwenVisionModel).trim() || DEFAULT_AGENT.qwenVisionModel
         : cur.qwenVisionModel,
+    referenceVisionMaxRounds:
+      partial.referenceVisionMaxRounds != null
+        ? Math.max(0, Math.min(5, Number(partial.referenceVisionMaxRounds) || 0))
+        : cur.referenceVisionMaxRounds,
   };
   if (partial.apiKey !== undefined) next.apiKey = String(partial.apiKey);
   if (partial.qwenApiKey !== undefined) next.qwenApiKey = sanitizeQwenApiKey(partial.qwenApiKey);
@@ -1116,19 +1140,9 @@ function normalizeOpenAiAssistantContent(raw) {
   return String(raw);
 }
 
-const QWEN_VISION_ANALYSIS_SYSTEM = [
-  '你是软件工程制图「参考图」分析专家。用户会提供截图、教材插图、白板草稿或手绘示意图，并附文字需求。',
-  '',
-  '请产出【结构化图示说明】文本，供下游另一个仅处理文本的 PlantUML 生成模型使用。务必：',
-  '1) 判断最可能的图示类型（UML 时序/类/组件/用例/状态、活动/流程、Chen ER、WBS、混合等）。',
-  '2) 逐条列出图中的命名元素（参与者、类/对象、模块框、泳道、实体、关系名等），保留原文与层次。',
-  '3) 描述连线/箭头及方向，说明含义（同步调用、异步、返回、包含、泛化、依赖、数据流等）。',
-  '4) 逐字抄录图中清晰可读的文字标注、编号、条件分支文字；看不清的写「不清晰」并简述原因。',
-  '5) 若用户要求一比一复刻，请在结论段用「复刻要点」列出必须与图一致的关键几何/顺序约束。',
-  '6) 默认不要输出完整 PlantUML 源码；若图中结构极简单且你完全有把握，可在最后一节用「可选草稿」给出极简片段，并用「需人工核对」注明。',
-  '',
-  '输出中文，使用清晰小标题（如「元素清单」「连接关系」「图中文字」）。',
-].join('\n');
+function getVisionKbExcerpt() {
+  return readVisionKbExcerptFromCandidates(visionKbCandidatePaths(process.resourcesPath || ''), 4000);
+}
 
 /**
  * @param {unknown} raw
@@ -1324,14 +1338,328 @@ async function analyzeReferenceImagesWithQwen(cfg, userText, images, logsArr) {
   const out = await dashscopeCompatibleChat(
     cfg,
     [
-      { role: 'system', content: QWEN_VISION_ANALYSIS_SYSTEM },
+      { role: 'system', content: buildVisionAnalysisSystemPrompt(getVisionKbExcerpt()) },
       { role: 'user', content: contentParts },
     ],
-    { temperature: 0.1, max_tokens: 4096, timeoutMs: 180000 }
+    { temperature: 0.08, max_tokens: 6144, timeoutMs: 180000 }
   );
 
   logsArr.push(`[vision] VL 输出约 ${out.length} 字符`);
   return out.trim();
+}
+
+/**
+ * @param {Record<string, unknown>} cfg
+ * @param {string} baseUserText
+ * @param {string} visionBrief
+ * @param {string} sourceSummary
+ * @param {{ mimeType: string, dataBase64: string }[]} referenceImages
+ * @param {{ mimeType: string, dataBase64: string }} renderedImage
+ * @param {string[]} logsArr
+ * @returns {Promise<string>}
+ */
+async function compareReferenceWithRenderedImages(
+  cfg,
+  baseUserText,
+  visionBrief,
+  sourceSummary,
+  referenceImages,
+  renderedImage,
+  logsArr
+) {
+  const contentParts = [];
+  for (const im of referenceImages) {
+    const mime = im.mimeType.includes('/') ? im.mimeType : 'image/png';
+    contentParts.push({
+      type: 'image_url',
+      image_url: { url: `data:${mime};base64,${im.dataBase64}` },
+    });
+  }
+  const rMime = renderedImage.mimeType.includes('/') ? renderedImage.mimeType : 'image/png';
+  contentParts.push({
+    type: 'image_url',
+    image_url: { url: `data:${rMime};base64,${renderedImage.dataBase64}` },
+  });
+  contentParts.push({
+    type: 'text',
+    text: [
+      '【图 A】上方前若干张为用户原始参考图。',
+      '【图 B】最后一张为当前 PlantUML 源码渲染结果。',
+      '',
+      '【用户原始需求】',
+      String(baseUserText || '').trim().slice(0, 3000),
+      '',
+      '【首轮结构化分析（摘要）】',
+      String(visionBrief || '').trim().slice(0, 5000),
+      '',
+      '【当前 PlantUML 源码摘要】',
+      String(sourceSummary || '').trim().slice(0, 4000),
+    ].join('\n'),
+  });
+
+  const modelLabel = String(cfg.qwenVisionModel || DEFAULT_AGENT.qwenVisionModel).trim();
+  logsArr.push(`[visual-compare] 千问双图比对：model=${modelLabel}`);
+
+  return (
+    await dashscopeCompatibleChat(
+      cfg,
+      [
+        { role: 'system', content: QWEN_VISION_COMPARE_SYSTEM },
+        { role: 'user', content: contentParts },
+      ],
+      { temperature: 0.06, max_tokens: 4096, timeoutMs: 180000 }
+    )
+  ).trim();
+}
+
+/**
+ * @param {object} p
+ */
+async function deepseekRevisePlantumlFromVisualDiff(p) {
+  const cfg = { ...DEFAULT_AGENT, ...(p.cfg && typeof p.cfg === 'object' ? p.cfg : {}) };
+  const ut = String(p.baseUserText || '');
+  const intent = classifyDiagramIntent(`${ut}\n${String(p.visionBrief || '').slice(0, 800)}`, cfg.chinaUnivMode);
+  const kbPath = findKnowledgeBasePath();
+  const inj = buildKnowledgeInjection({
+    kbPath: kbPath || '',
+    intent,
+    userText: ut,
+    maxChars: 40000,
+    jarLabel: resolvePlantumlJarLabelForPrompt(),
+  });
+  const kbPayload = {
+    l0: inj.l0,
+    kbExcerpt: inj.kbExcerpt,
+    selectedTitles: inj.selectedTitles,
+    intent,
+  };
+  const system = `${buildAgentSystemPrompt(kbPayload, cfg)}${VISUAL_FIX_DEEPSEEK_APPEND}`;
+  const userContent = buildVisualFixUserContent({
+    visualRound: p.visualRound,
+    maxVisualRounds: p.maxVisualRounds,
+    baseUserText: p.baseUserText,
+    visionBrief: p.visionBrief,
+    visualDiffReport: p.visualDiffReport,
+    source: p.source,
+    editorSource: p.editorSource,
+  });
+
+  const raw = await deepseekChat(cfg, [
+    { role: 'system', content: system },
+    { role: 'user', content: userContent },
+  ], { temperature: 0.35, timeoutMs: 120000 });
+
+  let extracted = extractPlantumlFromModelText(raw);
+  extracted = applyChinaUnivModeIfNeeded(extracted, cfg, { intent, userText: ut });
+  if (!extracted.includes('@start') || !extracted.includes('@end')) {
+    return { ok: false, error: '视觉修订输出中未找到 @start...@end 结构', source: p.source };
+  }
+  return { ok: true, source: extracted };
+}
+
+/**
+ * @param {object} p
+ */
+async function verifyPlantumlSourceWithSyntaxRetries(p) {
+  let source = String(p.source || '');
+  const fallback = source;
+  const cfg = p.cfg;
+  const logs = p.logsArr;
+  const prefix = p.logPrefix || '[visual]';
+  const maxExtra = Math.max(0, Math.min(5, Number(p.maxSyntaxRetries ?? AGENT_REFERENCE_VISION_SYNTAX_RETRIES)));
+  const maxRounds = 1 + maxExtra;
+  let lastErr = '';
+
+  for (let round = 0; round < maxRounds; round++) {
+    const { ok, errText } = await plantumlRenderCheckWithOptionalSvg(source);
+    if (ok) {
+      if (round > 0) logs.push(`${prefix} 语法校验第 ${round + 1} 次通过`);
+      return { ok: true, source };
+    }
+    lastErr = errText || '未知渲染错误';
+    if (round >= maxRounds - 1) {
+      return { ok: false, error: lastErr, source: fallback };
+    }
+    logs.push(`${prefix} 语法校验失败，请求 DeepSeek 修正：${lastErr.slice(0, 200)}`);
+    const ut = String(p.baseUserText || '');
+    const intent = classifyDiagramIntent(ut, cfg.chinaUnivMode);
+    const kbPath = findKnowledgeBasePath();
+    const inj = buildKnowledgeInjection({
+      kbPath: kbPath || '',
+      intent,
+      userText: ut,
+      maxChars: 40000,
+      jarLabel: resolvePlantumlJarLabelForPrompt(),
+    });
+    const system = buildAgentSystemPrompt(
+      { l0: inj.l0, kbExcerpt: inj.kbExcerpt, selectedTitles: inj.selectedTitles, intent },
+      cfg
+    );
+    const userContent = buildAgentRetryUserContent({
+      isProject: false,
+      round: round + 1,
+      lastErr,
+      source,
+      dupTail: '',
+      editorSource: p.editorSource || '',
+    });
+    const raw = await deepseekChat(cfg, [
+      { role: 'system', content: system },
+      { role: 'user', content: userContent },
+    ], { temperature: 0.55 });
+    let extracted = extractPlantumlFromModelText(raw);
+    extracted = applyChinaUnivModeIfNeeded(extracted, cfg, { intent, userText: ut });
+    if (extracted.includes('@start') && extracted.includes('@end')) source = extracted;
+  }
+
+  return { ok: false, error: lastErr || '语法校验失败', source: fallback };
+}
+
+/**
+ * @param {object} p
+ */
+async function runReferenceVisualCorrectionLoop(p) {
+  const logs = p.logsArr;
+  let source = String(p.initialSource || '');
+  const cfg = { ...DEFAULT_AGENT, ...(p.cfg && typeof p.cfg === 'object' ? p.cfg : {}) };
+  const maxVisualRounds = Math.max(
+    0,
+    Math.min(5, Number(p.maxVisualRounds ?? cfg.referenceVisionMaxRounds ?? AGENT_REFERENCE_VISION_MAX_ROUNDS_DEFAULT))
+  );
+
+  if (maxVisualRounds <= 0 || !p.referenceImages?.length) {
+    return { ok: true, source, logs };
+  }
+
+  logs.push(`[visual-loop] 启动参考图视觉闭环，最多 ${maxVisualRounds} 轮`);
+
+  for (let vr = 1; vr <= maxVisualRounds; vr++) {
+    const render = await plantumlRenderCheck(source, plantumlPngRenderOptions());
+    if (!render.ok || !render.buffer?.length) {
+      logs.push(`[visual-${vr}] 渲染失败，跳过比对：${render.errText || '空 PNG'}`);
+      break;
+    }
+
+    if (render.buffer.length > AGENT_QWEN_REF_IMAGE_BYTES_MAX) {
+      logs.push(`[visual-${vr}] 渲染 PNG 过大（>${AGENT_QWEN_REF_IMAGE_BYTES_MAX} 字节），跳过比对`);
+      break;
+    }
+
+    const renderedImage = {
+      mimeType: 'image/png',
+      dataBase64: render.buffer.toString('base64'),
+    };
+
+    let diffReport = '';
+    try {
+      diffReport = await compareReferenceWithRenderedImages(
+        cfg,
+        p.baseUserText,
+        p.visionBrief,
+        foldSourceMiddle(source, 2500, 2500),
+        p.referenceImages,
+        renderedImage,
+        logs
+      );
+      logs.push(`[visual-${vr}] 差异报告约 ${diffReport.length} 字符`);
+    } catch (e) {
+      logs.push(`[visual-${vr}] 千问比对失败：${String(e.message || e).slice(0, 240)}`);
+      break;
+    }
+
+    if (!shouldContinueVisualCorrection(diffReport)) {
+      logs.push(`[visual-${vr}] 千问判定无显著差异，视觉闭环结束`);
+      break;
+    }
+
+    logs.push(`[visual-${vr}] 发现显著差异，请求 DeepSeek 按报告修订…`);
+    let revised;
+    try {
+      revised = await deepseekRevisePlantumlFromVisualDiff({
+        cfg,
+        baseUserText: p.baseUserText,
+        visionBrief: p.visionBrief,
+        visualDiffReport: diffReport,
+        source,
+        editorSource: p.editorSource,
+        visualRound: vr,
+        maxVisualRounds,
+      });
+    } catch (e) {
+      logs.push(`[visual-${vr}] DeepSeek 修订失败：${String(e.message || e).slice(0, 240)}`);
+      continue;
+    }
+
+    if (!revised.ok) {
+      logs.push(`[visual-${vr}] ${revised.error || '修订无效'}，保留上一轮源码`);
+      continue;
+    }
+
+    const syntax = await verifyPlantumlSourceWithSyntaxRetries({
+      cfg,
+      source: revised.source,
+      baseUserText: p.baseUserText,
+      editorSource: p.editorSource,
+      logsArr: logs,
+      logPrefix: `[visual-${vr}]`,
+    });
+
+    if (!syntax.ok) {
+      logs.push(`[visual-${vr}] 修订后语法仍未通过，保留上一轮可渲染源码`);
+      continue;
+    }
+
+    source = syntax.source;
+    logs.push(`[visual-${vr}] 视觉修订完成，源码约 ${source.length} 字符`);
+  }
+
+  return { ok: true, source, logs };
+}
+
+/**
+ * 参考图混合流水线：DeepSeek 首版生成 + 可选视觉闭环。
+ */
+async function runHybridReferenceAgentPipeline(
+  baseUserText,
+  effectiveText,
+  visionBrief,
+  referenceImages,
+  projectRootFromUi,
+  ignoreGlobsText,
+  conversationHistory,
+  editorSource,
+  cfgFull
+) {
+  const r = await runAgentPipelineAdaptive(
+    effectiveText,
+    projectRootFromUi,
+    ignoreGlobsText,
+    conversationHistory,
+    editorSource
+  );
+  const logs = Array.isArray(r.logs) ? [...r.logs] : [];
+
+  if (!r.ok || !r.source) {
+    return { ...r, logs };
+  }
+
+  const cfg = { ...DEFAULT_AGENT, ...(cfgFull && typeof cfgFull === 'object' ? cfgFull : {}) };
+  const visual = await runReferenceVisualCorrectionLoop({
+    cfg,
+    baseUserText,
+    visionBrief,
+    referenceImages,
+    initialSource: r.source,
+    editorSource,
+    logsArr: logs,
+  });
+
+  return {
+    ok: visual.ok !== false && Boolean(visual.source || r.source),
+    source: visual.source || r.source,
+    error: visual.error || r.error,
+    logs: visual.logs || logs,
+  };
 }
 
 /**
@@ -2310,9 +2638,11 @@ function registerIpcHandlers() {
 
       /** @type {string} */
       let effectiveText = baseUserText;
+      /** @type {string} */
+      let visionMd = '';
       try {
         if (sanitizedImgs.length > 0) {
-          const visionMd = await analyzeReferenceImagesWithQwen(cfgFull, baseUserText, sanitizedImgs, visionLogs);
+          visionMd = await analyzeReferenceImagesWithQwen(cfgFull, baseUserText, sanitizedImgs, visionLogs);
           effectiveText = mergeUserTextWithVisionSummary(
             baseUserText,
             visionMd,
@@ -2338,13 +2668,26 @@ function registerIpcHandlers() {
       const conversationHistory = Array.isArray(p.conversationHistory) ? p.conversationHistory : [];
       const editorSource =
         p.editorSource !== undefined && p.editorSource !== null ? String(p.editorSource) : '';
-      const r = await runAgentPipelineAdaptive(
-        effectiveText,
-        projectRoot,
-        ignoreGlobsText,
-        conversationHistory,
-        editorSource
-      );
+      const r =
+        sanitizedImgs.length > 0
+          ? await runHybridReferenceAgentPipeline(
+              baseUserText,
+              effectiveText,
+              visionMd,
+              sanitizedImgs,
+              projectRoot,
+              ignoreGlobsText,
+              conversationHistory,
+              editorSource,
+              cfgFull
+            )
+          : await runAgentPipelineAdaptive(
+              effectiveText,
+              projectRoot,
+              ignoreGlobsText,
+              conversationHistory,
+              editorSource
+            );
       if (r?.ok) maybeConsumeFreeAfterSuccess(snap);
       const unlock = shouldUnlockAgentContent(snap);
       const mergedLogs = [...visionLogs, ...(Array.isArray(r.logs) ? r.logs : [])];

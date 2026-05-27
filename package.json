@@ -1,6 +1,6 @@
 {
   "name": "plantuml-studio-local",
-  "version": "2.0.0-pro.49",
+  "version": "2.0.0-pro.47",
   "description": "本地 PlantUML 编辑预览（PicoWeb + Electron，v2.0.0 Pro：KB 分层注入、意图路由、规划器扩展与分级修正）",
   "main": "electron-main.mjs",
   "type": "module",
@@ -38,6 +38,7 @@
       "scripts/project-context.mjs",
       "scripts/agent-intent.mjs",
       "scripts/kb-inject.mjs",
+      "scripts/reference-vision-pipeline.mjs",
       "scripts/china-univ-activity-sanitize.mjs",
       "scripts/diagram-grammar.mjs",
       "scripts/studio-arch-graph.mjs",
