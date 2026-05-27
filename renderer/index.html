@@ -72,22 +72,25 @@
               <label for="agent-request">自然语言需求</label>
             </div>
             <div class="agent-chat-toolbar" role="group" aria-label="多轮对话">
-              <label class="agent-chat-toolbar__label" for="agent-chat-select">对话</label>
-              <select id="agent-chat-select" class="agent-chat-select" title="切换本地保存的对话上下文"></select>
-              <button type="button" id="btn-agent-chat-new" class="ghost agent-chat-btn" title="清空多轮上下文并开始新会话">
-                新建对话
-              </button>
-              <button type="button" id="btn-agent-chat-delete" class="ghost agent-chat-btn" title="删除当前对话及其本地记录">
-                删除当前
-              </button>
+              <div class="agent-chat-toolbar__main">
+                <label class="agent-chat-toolbar__label" for="agent-chat-select">对话</label>
+                <select id="agent-chat-select" class="agent-chat-select" title="切换本地保存的对话上下文"></select>
+              </div>
+              <div class="agent-chat-toolbar__actions">
+                <button type="button" id="btn-agent-chat-new" class="agent-chat-action" title="清空多轮上下文并开始新会话">
+                  <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                  <span>新建</span>
+                </button>
+                <button type="button" id="btn-agent-chat-delete" class="agent-chat-action agent-chat-action--danger" title="删除当前对话及其本地记录">
+                  <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                  <span>删除</span>
+                </button>
+              </div>
             </div>
             <div class="agent-compose" id="agent-compose" aria-label="智能生成输入区">
               <div class="agent-compose__top">
                 <div id="agent-skill-chips" class="agent-skill-chips" role="list" aria-label="已选制图能力"></div>
                 <div id="agent-ref-image-previews" class="agent-ref-previews" aria-live="polite"></div>
-                <p class="agent-compose__ref-hint">
-                  参考图至多 4 张、单张 ≤ 2MB；可点击「+」选图或使用 <kbd>Ctrl</kbd>+<kbd>V</kbd> 粘贴截图。空行输入「<span aria-hidden="true">/</span>」可唤出制图技能列表。
-                </p>
               </div>
               <textarea
                 id="agent-request"
@@ -139,14 +142,11 @@
                     type="button"
                     id="btn-agent-run"
                     class="agent-compose-send"
-                    title="路由：有项目目录时由 DeepSeek 判别是否读仓库；通过后进入项目制图（规划选文件 + 读摘要）。路由失败时回退规则。"
-                    aria-label="智能生成 PlantUML"
+                    title="发送并智能生成 PlantUML"
+                    aria-label="发送并智能生成"
                   >
-                    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" class="agent-compose-send__icon">
-                      <path
-                        fill="currentColor"
-                        d="M4.01 17.72L19.93 11 4 4.56v7.23l11.61 2.21L4.01 10.72v7z"
-                      />
+                    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" class="agent-compose-send__icon">
+                      <path fill="currentColor" d="M12 4l7 7-1.41 1.41L13 8.83V20h-2V8.83L6.41 12.41 5 11l7-7z"/>
                     </svg>
                   </button>
                 </div>
@@ -202,7 +202,6 @@
         <h2 class="stash-heading">产出物暂存区</h2>
         <span id="stash-count" class="stash-count">0 项</span>
         <div class="stash-bar-actions">
-          <button type="button" id="btn-stash-new-folder">新建文件夹</button>
           <button type="button" id="btn-stash-refresh">刷新</button>
           <button type="button" id="btn-stash-select-all">全选</button>
           <button type="button" id="btn-stash-select-none">取消全选</button>
@@ -211,7 +210,7 @@
         </div>
       </div>
       <div id="stash-body" class="stash-body">
-        <p id="stash-empty" class="stash-empty">暂无条目。渲染预览后点击「加入暂存区」即可持久保存，便于多图比对。</p>
+        <p id="stash-empty" class="stash-empty">暂无条目。渲染预览后可加入暂存区；开启「自动加入暂存区」时，智能生成成功也会按项目/日期归档。</p>
         <div id="stash-tree" class="stash-tree hidden"></div>
       </div>
     </section>
@@ -230,10 +229,8 @@
       <div class="stash-add-body">
         <label for="stash-add-name">名称</label>
         <input id="stash-add-name" type="text" placeholder="输入名称" />
-        <label for="stash-add-folder">保存位置</label>
-        <select id="stash-add-folder">
-          <option value="">暂存区根目录</option>
-        </select>
+        <p id="stash-add-path-hint" class="stash-add-path-hint"></p>
+        <select id="stash-add-folder" class="hidden" aria-hidden="true"></select>
       </div>
       <div class="app-dialog-actions">
         <button type="button" id="btn-stash-add-confirm" class="primary">确定</button>
@@ -299,13 +296,18 @@
             <label for="cfg-qwen-vision-model">通义千问 视觉模型名</label>
             <input id="cfg-qwen-vision-model" type="text" placeholder="例如 qwen-vl-plus 或 qwen-vl-max" />
           </div>
+          <div class="agent-field agent-field--check">
+            <label class="agent-check-label">
+              <input id="cfg-auto-stash" type="checkbox" checked />
+              智能生成成功后自动加入暂存区（按项目/日期归档）
+            </label>
+          </div>
         </div>
         <div class="agent-settings-hint">
           <p>
-            PlantUML 制图仍由 <strong>DeepSeek</strong> 完成；勾选「参考图」时，会先经 <strong>阿里云通义千问 VL</strong> 将图片转为结构化文字说明，再与需求合并后送入 DeepSeek；首版渲染后还可开启<strong>视觉闭环</strong>（千问比对参考图与渲染图 → DeepSeek 修订）。千问 Key 在
+            PlantUML 制图仍由 <strong>DeepSeek</strong> 完成；勾选「参考图」时，会先经 <strong>阿里云通义千问 VL</strong> 将图片转为结构化文字说明，再与需求合并后送入 DeepSeek。千问 Key 在
             <a href="https://help.aliyun.com/zh/dashscope/" rel="noreferrer" target="_blank">DashScope 控制台</a>
-            获取。若出现 401，请确认 Key 与 Base URL 区域一致（北京 Key 用
-            <code>dashscope.aliyuncs.com</code>，新加坡 Key 用 <code>dashscope-intl.aliyuncs.com</code>），且勿与 DeepSeek Key 混用。
+            获取。
           </p>
           <p class="agent-settings-hint--sub">
             与本仓库《UML大师-Agent-开发计划》一致：密钥仅存于本机用户目录，不会写入仓库。
@@ -337,6 +339,13 @@
         <button type="button" id="btn-agent-advanced-save" class="primary">保存并关闭</button>
         <button type="button" id="agent-advanced-close-btn" class="ghost">取消</button>
       </div>
+    </dialog>
+    <dialog id="help-plantuml-dialog" class="app-dialog app-dialog--wide help-plantuml-dialog">
+      <div class="app-dialog-head">
+        <h3 class="app-dialog-title">PlantUML 语法速查</h3>
+        <button type="button" id="help-plantuml-close" class="app-dialog-close">关闭</button>
+      </div>
+      <article id="help-plantuml-body" class="help-plantuml-body"></article>
     </dialog>
     <dialog id="session-log-dialog" class="app-dialog app-dialog--wide">
       <div class="app-dialog-head">

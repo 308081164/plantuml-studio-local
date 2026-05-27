@@ -21,6 +21,11 @@ ipcRenderer.on('studio:menu-license', () => {
   if (menuLicenseHandler) menuLicenseHandler();
 });
 
+let menuPlantumlGuideHandler = null;
+ipcRenderer.on('studio:menu-plantuml-guide', () => {
+  if (menuPlantumlGuideHandler) menuPlantumlGuideHandler();
+});
+
 function base64ToArrayBuffer(b64) {
   const binary = atob(b64);
   const len = binary.length;
