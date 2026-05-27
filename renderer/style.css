@@ -485,16 +485,30 @@ button:hover {
 .agent-ref-previews {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem;
+  gap: 0.45rem;
   min-height: 0;
 }
+
+.agent-ref-preview {
   position: relative;
-  width: 4.6rem;
-  height: 3.65rem;
-  border-radius: 8px;
+  flex: 0 0 auto;
+  width: 3.25rem;
+  height: 3.25rem;
+  border-radius: 10px;
   overflow: hidden;
   border: 1px solid var(--border);
   background: #fff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.agent-ref-preview__btn {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: zoom-in;
 }
 
 .agent-ref-preview img {
@@ -502,28 +516,50 @@ button:hover {
   height: 100%;
   object-fit: cover;
   display: block;
+  pointer-events: none;
 }
 
 .agent-ref-preview__rm {
   position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 1.28rem;
-  height: 1.28rem;
+  top: 3px;
+  right: 3px;
+  z-index: 2;
+  width: 1.15rem;
+  height: 1.15rem;
   border-radius: 50%;
   border: none;
   cursor: pointer;
-  font-size: 1rem;
+  font-size: 0.85rem;
   line-height: 1;
   display: grid;
   place-items: center;
-  color: #444;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
+  color: #fff;
+  background: rgba(15, 23, 42, 0.72);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.25);
 }
 
 .agent-ref-preview__rm:hover {
-  color: #cf222e;
+  background: #cf222e;
+}
+
+.agent-ref-viewer-dialog {
+  padding: 0;
+  border: none;
+  border-radius: 12px;
+  max-width: min(92vw, 960px);
+  max-height: 92vh;
+  background: rgba(15, 23, 42, 0.92);
+}
+
+.agent-ref-viewer-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.agent-ref-viewer-dialog img {
+  display: block;
+  max-width: min(92vw, 960px);
+  max-height: 88vh;
+  object-fit: contain;
 }
 
 /* 智能生成：整块输入卡片（参考移动端对话排版：媒体区在上、正文、底栏圆形操作） */

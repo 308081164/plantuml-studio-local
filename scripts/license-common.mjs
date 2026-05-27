@@ -187,6 +187,31 @@ export function shortHwId(hwId) {
   return hwId ? hwId.slice(0, 16).toUpperCase() : '';
 }
 
+/**
+ * 规范化管理员输入的 HW_ID（须为完整 64 位十六进制）
+ * @param {unknown} raw
+ * @returns {{ ok: true, hwId: string } | { ok: false, error: string, isShort?: boolean }}
+ */
+export function normalizeHwIdInput(raw) {
+  const hwId = String(raw ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^0-9a-f]/g, '');
+  if (!hwId) return { ok: false, error: 'HW_ID 不能为空' };
+  if (hwId.length === 16) {
+    return {
+      ok: false,
+      isShort: true,
+      error:
+        '您输入的是 16 位短 HW_ID。激活设备码由完整 64 位设备指纹生成，请在客户端「授权激活」复制完整 HW_ID（非缩写）。',
+    };
+  }
+  if (hwId.length !== 64) {
+    return { ok: false, error: `HW_ID 须为 64 位十六进制字符（当前 ${hwId.length} 位）` };
+  }
+  return { ok: true, hwId };
+}
+
 /* ============================================================
  * 激活设备码（方案 B：HMAC-SHA256 + Crockford Base32）
  * ============================================================ */

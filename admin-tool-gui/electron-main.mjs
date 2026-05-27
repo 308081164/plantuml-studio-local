@@ -31,6 +31,7 @@ const {
   generateDeviceCode,
   validateDeviceCodeFormat,
   verifyDeviceCode,
+  normalizeHwIdInput,
   generateLicenseCode,
   parseLicenseCode,
   verifyLicenseSignature,
@@ -227,7 +228,9 @@ app.whenReady().then(() => {
       }
 
       const deviceCode = String(params?.deviceCode || '').trim();
-      const hwId = String(params?.hwId || '').trim().toLowerCase();
+      const hwNorm = normalizeHwIdInput(params?.hwId);
+      if (!hwNorm.ok) return { ok: false, error: hwNorm.error };
+      const hwId = hwNorm.hwId;
       const licenseModeRaw = params?.licenseMode === 'permanent' ? 'permanent' : 'time_limited';
       const commercialSkuRaw = String(params?.commercialOffer || '').trim();
       const isLegacySku = !commercialSkuRaw || commercialSkuRaw === 'legacy';
@@ -235,12 +238,12 @@ app.whenReady().then(() => {
       const fmt = validateDeviceCodeFormat(deviceCode);
       if (!fmt.valid) return { ok: false, error: fmt.error };
 
-      if (!hwId || hwId.length < 16) {
-        return { ok: false, error: 'HW_ID 至少 16 位十六进制字符' };
-      }
-
       if (!verifyDeviceCode(deviceCode, hwId)) {
-        return { ok: false, error: '激活设备码与 HW_ID 不匹配' };
+        return {
+          ok: false,
+          error:
+            '激活设备码与 HW_ID 不匹配。请确认设备码与完整 64 位 HW_ID 来自同一台电脑，且客户端与生成器使用相同版本。',
+        };
       }
 
       const issuedAt = String(params?.issuedAt || '').trim() || new Date().toISOString().split('T')[0];
