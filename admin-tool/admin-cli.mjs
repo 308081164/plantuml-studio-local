@@ -21,6 +21,7 @@ import {
   generateDeviceCode,
   validateDeviceCodeFormat,
   verifyDeviceCode,
+  normalizeHwIdInput,
   buildLicensePayload,
   parseLicenseCode,
   generateKeyPair,
@@ -141,14 +142,15 @@ async function cmdGenerate() {
   // 从激活设备码反推 HW_ID（方案 B：重算 HMAC 验证）
   // 注意：由于 HMAC 是单向的，管理员工具需要用户同时提供 HW_ID 或通过其他方式确认
   // 这里我们让用户输入 HW_ID 来验证
-  const hwIdInput = await ask('请输入用户的 HW_ID（设备指纹）: ');
-  if (!hwIdInput || hwIdInput.length < 16) {
-    console.error('❌ HW_ID 格式不正确（至少 16 位十六进制字符）\n');
+  const hwIdInput = await ask('请输入用户的完整 HW_ID（64 位十六进制）: ');
+  const hwNorm = normalizeHwIdInput(hwIdInput);
+  if (!hwNorm.ok) {
+    console.error(`❌ ${hwNorm.error}\n`);
     process.exit(1);
   }
 
   // 验证激活设备码与 HW_ID 匹配
-  const match = verifyDeviceCode(deviceCode, hwIdInput);
+  const match = verifyDeviceCode(deviceCode, hwNorm.hwId);
   if (!match) {
     console.error('❌ 激活设备码与 HW_ID 不匹配，请重新确认用户提供的信息\n');
     process.exit(1);
@@ -187,7 +189,7 @@ async function cmdGenerate() {
 
   // 生成激活码
   const payload = {
-    hwId: hwIdInput,
+    hwId: hwNorm.hwId,
     licenseMode,
     issuedAt: finalIssuedAt,
     tier: 'full',
@@ -214,7 +216,7 @@ async function cmdGenerate() {
   // 保存到文件
   const save = await ask('是否保存到文件？(Y/n): ');
   if (save.toLowerCase() !== 'n') {
-    const filename = `license-${hwIdInput.slice(0, 8)}-${Date.now()}.txt`;
+    const filename = `license-${hwNorm.hwId.slice(0, 8)}-${Date.now()}.txt`;
     const filepath = join(adminDataDir(), filename);
     writeFileSync(filepath, licenseCode + '\n', 'utf8');
     console.log(`已保存到: ${filepath}\n`);

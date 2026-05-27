@@ -161,6 +161,24 @@ const AGENT_REF_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
 /** @type {{ id: string; dataUrl: string }[]} */
 let attachedReferenceImages = [];
 
+function openAgentRefImageViewer(dataUrl) {
+  const dlg = $('agent-ref-viewer-dialog');
+  const im = $('agent-ref-viewer-img');
+  if (!dlg || !im || !dataUrl) return;
+  im.src = dataUrl;
+  if (typeof dlg.showModal === 'function') dlg.showModal();
+}
+
+function wireAgentRefImageViewerDialog() {
+  const dlg = $('agent-ref-viewer-dialog');
+  if (!dlg || dlg.dataset.wired === '1') return;
+  dlg.dataset.wired = '1';
+  dlg.addEventListener('click', (ev) => {
+    if (ev.target === dlg) dlg.close();
+  });
+  dlg.addEventListener('cancel', () => dlg.close());
+}
+
 function renderAgentRefImagePreviews() {
   const host = $('agent-ref-image-previews');
   if (!host) return;
@@ -169,16 +187,28 @@ function renderAgentRefImagePreviews() {
     const tile = document.createElement('div');
     tile.className = 'agent-ref-preview';
     tile.dataset.id = entry.id;
+
+    const zoomBtn = document.createElement('button');
+    zoomBtn.type = 'button';
+    zoomBtn.className = 'agent-ref-preview__btn';
+    zoomBtn.setAttribute('aria-label', '放大查看参考图');
     const im = document.createElement('img');
     im.alt = '参考缩略图';
     im.src = entry.dataUrl;
+    zoomBtn.appendChild(im);
+    zoomBtn.addEventListener('click', () => openAgentRefImageViewer(entry.dataUrl));
+
     const rm = document.createElement('button');
     rm.type = 'button';
     rm.className = 'agent-ref-preview__rm';
     rm.setAttribute('aria-label', '移除参考图');
     rm.textContent = '×';
-    rm.addEventListener('click', () => removeAgentRefImage(entry.id));
-    tile.appendChild(im);
+    rm.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      removeAgentRefImage(entry.id);
+    });
+
+    tile.appendChild(zoomBtn);
     tile.appendChild(rm);
     host.appendChild(tile);
   }
@@ -265,6 +295,7 @@ async function ingestReferenceImageFiles(files) {
 }
 
 function wireAgentReferenceImagesUi() {
+  wireAgentRefImageViewerDialog();
   const inp = $('agent-ref-image-input');
   if (!inp) return;
 
@@ -1900,7 +1931,7 @@ async function loadAgentForm() {
     const qwu = $('cfg-qwen-base-url');
     const qwm = $('cfg-qwen-vision-model');
     if (qwk) qwk.value = c.qwenApiKey || '';
-    if (qwu) qwu.value = c.qwenBaseUrl || 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+    if (qwu) qwu.value = c.qwenBaseUrl || '';
     if (qwm) qwm.value = c.qwenVisionModel || '';
     const ig = $('cfg-project-ignore-globs');
     if (ig) ig.value = c.projectIgnoreGlobs || '';
@@ -2090,6 +2121,7 @@ async function runAgent() {
     showToast(msg, 'error');
     reportErrorArchive('agent-exception', msg);
   } finally {
+    clearAttachedReferenceImages();
     endStudioBusy();
     void refreshEditionUi();
   }
@@ -2812,7 +2844,7 @@ async function refreshDeviceInfo() {
   try {
     const info = await window.studio.licenseGetDeviceInfo();
     if (info.ok) {
-      $('license-hw-id').textContent = info.shortHwId;
+      $('license-hw-id').textContent = info.hwId || info.shortHwId;
       $('license-device-code').textContent = info.deviceCode;
     } else {
       $('license-hw-id').textContent = '获取失败';
@@ -2921,6 +2953,18 @@ function wireLicenseDialog() {
   $('license-dialog-close').addEventListener('click', () => dlg.close());
   dlg.addEventListener('click', (ev) => {
     if (ev.target === dlg) dlg.close();
+  });
+
+  $('btn-license-copy-hw-id')?.addEventListener('click', async () => {
+    const hw = $('license-hw-id')?.textContent?.trim();
+    if (!hw || hw === '获取失败' || hw === '异常') return;
+    try {
+      if (window.studio?.copyText) await window.studio.copyText(hw);
+      else await navigator.clipboard.writeText(hw);
+      setStatus('已复制完整 HW_ID', true);
+    } catch {
+      setStatus('复制失败', false);
+    }
   });
 
   $('btn-license-copy-device-code').addEventListener('click', async () => {
