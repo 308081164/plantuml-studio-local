@@ -304,7 +304,8 @@
           <p>
             PlantUML 制图仍由 <strong>DeepSeek</strong> 完成；勾选「参考图」时，会先经 <strong>阿里云通义千问 VL</strong> 将图片转为结构化文字说明，再与需求合并后送入 DeepSeek。千问 Key 在
             <a href="https://help.aliyun.com/zh/dashscope/" rel="noreferrer" target="_blank">DashScope 控制台</a>
-            获取。
+            获取。若出现 401，请确认 Key 与 Base URL 区域一致（北京 Key 用
+            <code>dashscope.aliyuncs.com</code>，新加坡 Key 用 <code>dashscope-intl.aliyuncs.com</code>），且勿与 DeepSeek Key 混用。
           </p>
           <p class="agent-settings-hint--sub">
             与本仓库《UML大师-Agent-开发计划》一致：密钥仅存于本机用户目录，不会写入仓库。

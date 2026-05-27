@@ -1900,7 +1900,7 @@ async function loadAgentForm() {
     const qwu = $('cfg-qwen-base-url');
     const qwm = $('cfg-qwen-vision-model');
     if (qwk) qwk.value = c.qwenApiKey || '';
-    if (qwu) qwu.value = c.qwenBaseUrl || '';
+    if (qwu) qwu.value = c.qwenBaseUrl || 'https://dashscope.aliyuncs.com/compatible-mode/v1';
     if (qwm) qwm.value = c.qwenVisionModel || '';
     const ig = $('cfg-project-ignore-globs');
     if (ig) ig.value = c.projectIgnoreGlobs || '';

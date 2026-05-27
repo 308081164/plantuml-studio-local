@@ -229,11 +229,10 @@ function loadAgentConfig() {
           ? j.projectIgnoreGlobs.map(String).join('\n')
           : '',
       chinaUnivMode: j.chinaUnivMode === true || j.chinaUnivMode === 'true',
-      qwenApiKey: typeof j.qwenApiKey === 'string' ? j.qwenApiKey : '',
-      qwenBaseUrl:
-        typeof j.qwenBaseUrl === 'string' && j.qwenBaseUrl.trim()
-          ? j.qwenBaseUrl.trim()
-          : DEFAULT_AGENT.qwenBaseUrl,
+      qwenApiKey: sanitizeQwenApiKey(typeof j.qwenApiKey === 'string' ? j.qwenApiKey : ''),
+      qwenBaseUrl: normalizeQwenBaseUrl(
+        typeof j.qwenBaseUrl === 'string' && j.qwenBaseUrl.trim() ? j.qwenBaseUrl : DEFAULT_AGENT.qwenBaseUrl
+      ),
       qwenVisionModel:
         typeof j.qwenVisionModel === 'string' && j.qwenVisionModel.trim()
           ? j.qwenVisionModel.trim()
@@ -257,7 +256,7 @@ function saveAgentConfig(partial) {
         : cur.maxRetries,
     qwenBaseUrl:
       partial.qwenBaseUrl != null
-        ? String(partial.qwenBaseUrl).trim() || DEFAULT_AGENT.qwenBaseUrl
+        ? normalizeQwenBaseUrl(String(partial.qwenBaseUrl).trim() || DEFAULT_AGENT.qwenBaseUrl)
         : cur.qwenBaseUrl,
     qwenVisionModel:
       partial.qwenVisionModel != null
@@ -265,7 +264,7 @@ function saveAgentConfig(partial) {
         : cur.qwenVisionModel,
   };
   if (partial.apiKey !== undefined) next.apiKey = String(partial.apiKey);
-  if (partial.qwenApiKey !== undefined) next.qwenApiKey = String(partial.qwenApiKey);
+  if (partial.qwenApiKey !== undefined) next.qwenApiKey = sanitizeQwenApiKey(partial.qwenApiKey);
   if (partial.lastProjectRoot !== undefined) next.lastProjectRoot = String(partial.lastProjectRoot);
   if (partial.projectIgnoreGlobs !== undefined) next.projectIgnoreGlobs = String(partial.projectIgnoreGlobs);
   if (partial.chinaUnivMode !== undefined) next.chinaUnivMode = partial.chinaUnivMode ? true : false;
@@ -973,6 +972,134 @@ async function deepseekChat(config, messages, options = {}) {
   throw new Error(lastFlat || 'DeepSeek 请求失败');
 }
 
+/** DashScope 兼容端点预设（Key 区域须与 Base URL 一致） */
+const QWEN_ENDPOINT_PRESETS = {
+  china: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  intl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+  us: 'https://dashscope-us.aliyuncs.com/compatible-mode/v1',
+  hk: 'https://cn-hongkong.dashscope.aliyuncs.com/compatible-mode/v1',
+  codingChina: 'https://coding.dashscope.aliyuncs.com/v1',
+  codingIntl: 'https://coding-intl.dashscope.aliyuncs.com/v1',
+};
+
+/** @param {unknown} raw */
+function sanitizeQwenApiKey(raw) {
+  let key = String(raw ?? '').trim();
+  if (!key) return '';
+  key = key.replace(/^["'`]+|["'`]+$/g, '').trim();
+  key = key.replace(/^Bearer\s+/i, '').trim();
+  return key;
+}
+
+/** @param {unknown} raw */
+function normalizeQwenBaseUrl(raw) {
+  let url = String(raw ?? '').trim();
+  if (!url) return DEFAULT_AGENT.qwenBaseUrl;
+  url = url.replace(/\/+$/, '');
+  url = url.replace(/\/chat\/completions\/?$/i, '');
+
+  const hostOnlyFixes = [
+    ['^https://dashscope\\.aliyuncs\\.com$', QWEN_ENDPOINT_PRESETS.china],
+    ['^https://dashscope-intl\\.aliyuncs\\.com$', QWEN_ENDPOINT_PRESETS.intl],
+    ['^https://dashscope-us\\.aliyuncs\\.com$', QWEN_ENDPOINT_PRESETS.us],
+    ['^https://cn-hongkong\\.dashscope\\.aliyuncs\\.com$', QWEN_ENDPOINT_PRESETS.hk],
+    ['^https://coding\\.dashscope\\.aliyuncs\\.com$', QWEN_ENDPOINT_PRESETS.codingChina],
+    ['^https://coding-intl\\.dashscope\\.aliyuncs\\.com$', QWEN_ENDPOINT_PRESETS.codingIntl],
+  ];
+  for (const [pattern, preset] of hostOnlyFixes) {
+    if (new RegExp(pattern, 'i').test(url)) return preset;
+  }
+
+  if (/\/compatible-mode\/?$/i.test(url)) {
+    url = `${url.replace(/\/+$/, '')}/v1`;
+  } else if (!/\/v1$/i.test(url) && /dashscope/i.test(url) && !/\/api\//i.test(url)) {
+    url = `${url}/v1`;
+  }
+
+  return url || DEFAULT_AGENT.qwenBaseUrl;
+}
+
+/**
+ * @param {string} apiKey
+ * @param {unknown} configuredBase
+ * @returns {string[]}
+ */
+function buildQwenBaseUrlCandidates(apiKey, configuredBase) {
+  const key = sanitizeQwenApiKey(apiKey);
+  const normalized = normalizeQwenBaseUrl(configuredBase);
+  /** @type {string[]} */
+  const out = [];
+  const push = (candidate) => {
+    const next = normalizeQwenBaseUrl(candidate);
+    if (next && !out.includes(next)) out.push(next);
+  };
+
+  if (/^sk-sp-/i.test(key)) {
+    push(QWEN_ENDPOINT_PRESETS.codingChina);
+    push(QWEN_ENDPOINT_PRESETS.codingIntl);
+    if (!normalized.includes('coding.dashscope')) push(normalized);
+    return out;
+  }
+
+  push(normalized);
+  for (const preset of [
+    QWEN_ENDPOINT_PRESETS.china,
+    QWEN_ENDPOINT_PRESETS.intl,
+    QWEN_ENDPOINT_PRESETS.us,
+    QWEN_ENDPOINT_PRESETS.hk,
+  ]) {
+    push(preset);
+  }
+  return out;
+}
+
+/** @param {unknown} baseUrl */
+function validateQwenBaseUrlHost(baseUrl) {
+  const url = normalizeQwenBaseUrl(baseUrl).toLowerCase();
+  if (/deepseek|api\.openai\.com|anthropic|openrouter|together\.ai|groq\.com/i.test(url)) {
+    throw new Error(
+      '通义千问 Base URL 指向了其它 AI 服务商域名。请填写 DashScope 兼容端点，例如 https://dashscope.aliyuncs.com/compatible-mode/v1（北京）或 https://dashscope-intl.aliyuncs.com/compatible-mode/v1（新加坡）。'
+    );
+  }
+  if (!/dashscope|aliyuncs\.com/i.test(url)) {
+    throw new Error(
+      '通义千问 Base URL 不是有效的 DashScope 端点。一般须以 /v1 结尾，例如 https://dashscope.aliyuncs.com/compatible-mode/v1'
+    );
+  }
+}
+
+/**
+ * @param {string} apiKey
+ * @param {string[]} triedBases
+ * @param {string} lastBody
+ */
+function buildQwen401Diagnostic(apiKey, triedBases, lastBody) {
+  const key = sanitizeQwenApiKey(apiKey);
+  const lines = [
+    '请检查：',
+    '1) DashScope API Key 是否正确（勿与 DeepSeek Key 混用；Key 通常以 sk- 开头）',
+  ];
+  if (/^sk-sp-/i.test(key)) {
+    lines.push(
+      '2) 您使用的是 Coding Plan 专用 Key（sk-sp-），Base URL 须为 https://coding.dashscope.aliyuncs.com/v1（国内）或 https://coding-intl.dashscope.aliyuncs.com/v1（国际）'
+    );
+  } else {
+    lines.push(
+      '2) API Key 所在区域须与 Base URL 一致：北京 Key → https://dashscope.aliyuncs.com/compatible-mode/v1；新加坡 Key → https://dashscope-intl.aliyuncs.com/compatible-mode/v1'
+    );
+  }
+  lines.push('3) 账号是否已开通 qwen-vl-plus / qwen-vl-max 等视觉模型权限');
+  lines.push('4) 当前网络能否访问 dashscope*.aliyuncs.com');
+  if (triedBases.length > 1) {
+    lines.push(`\n已自动尝试 ${triedBases.length} 个兼容端点均未通过鉴权。`);
+  }
+  if (lastBody && /invalid_api_key|Incorrect API key/i.test(lastBody)) {
+    lines.push('\n服务端返回：API Key 无效（invalid_api_key）。请到 DashScope 控制台重新创建 Key 并粘贴到「通义千问 API Key」字段。');
+  }
+  return lines.join('\n');
+}
+
+
 /** 通义千问（DashScope OpenAI 兼容）多模态助手返回的 content 归一化为纯文本 */
 function normalizeOpenAiAssistantContent(raw) {
   if (raw == null) return '';
@@ -1051,13 +1178,11 @@ function mergeUserTextWithVisionSummary(userText, visionSummary, maxChars) {
  * DashScope-compatible OpenAI：`/v1/chat/completions`，支持多模态 user content 数组。
  */
 async function dashscopeCompatibleChat(config, messages, options = {}) {
-  const base = String(config.qwenBaseUrl || '')
-    .trim()
-    .replace(/\/$/, '');
-  if (!base) throw new Error('未配置通义千问 Base URL');
-  const url = `${base}/chat/completions`;
-  const key = String(config.qwenApiKey || '').trim();
+  const key = sanitizeQwenApiKey(config.qwenApiKey);
   if (!key) throw new Error('未配置通义千问 API Key');
+
+  validateQwenBaseUrlHost(config.qwenBaseUrl || DEFAULT_AGENT.qwenBaseUrl);
+  const baseCandidates = buildQwenBaseUrlCandidates(key, config.qwenBaseUrl);
 
   const model =
     typeof options.model === 'string' && options.model.trim()
@@ -1080,69 +1205,87 @@ async function dashscopeCompatibleChat(config, messages, options = {}) {
       : 180000;
 
   const maxAttempts = Math.max(1, Math.min(6, Number(options.fetchMaxAttempts) || 4));
+  const body = JSON.stringify({ model, messages, temperature, max_tokens: maxTokens });
 
-  const bodyObj = { model, messages, temperature, max_tokens: maxTokens };
-  const body = JSON.stringify(bodyObj);
   let lastFlat = '';
+  let lastBody = '';
+  /** @type {string[]} */
+  const triedBases = [];
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${key}`,
-        },
-        body,
-        signal: controller.signal,
-      });
-      clearTimeout(t);
+  for (const baseRaw of baseCandidates) {
+    const base = normalizeQwenBaseUrl(baseRaw);
+    const url = `${base}/chat/completions`;
+    triedBases.push(base);
 
-      if (!res.ok) {
-        const t2 = await res.text();
-        const flatHttp = `HTTP ${res.status}: ${t2.slice(0, 1200)}`;
-        lastFlat = flatHttp;
-        const retryable = [408, 425, 429, 500, 502, 503, 504].includes(res.status);
-        if (retryable && attempt < maxAttempts) {
-          await sleepMs(Math.min(12000, 450 * 2 ** (attempt - 1)) + Math.floor(Math.random() * 260));
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${key}`,
+          },
+          body,
+          signal: controller.signal,
+        });
+        clearTimeout(t);
+
+        if (res.status === 401) {
+          const t2 = await res.text();
+          lastBody = t2;
+          lastFlat = `HTTP 401: ${t2.slice(0, 1200)}`;
+          break;
+        }
+
+        if (!res.ok) {
+          const t2 = await res.text();
+          const flatHttp = `HTTP ${res.status}: ${t2.slice(0, 1200)}`;
+          lastFlat = flatHttp;
+          lastBody = t2;
+          const retryable = [408, 425, 429, 500, 502, 503, 504].includes(res.status);
+          if (retryable && attempt < maxAttempts) {
+            await sleepMs(Math.min(12000, 450 * 2 ** (attempt - 1)) + Math.floor(Math.random() * 260));
+            continue;
+          }
+          throw new Error(`通义千问请求失败 ${flatHttp}`);
+        }
+
+        const j = await res.json();
+        const rawContent = j?.choices?.[0]?.message?.content;
+        const normalized = normalizeOpenAiAssistantContent(rawContent);
+        if (!normalized) throw new Error('通义千问响应无有效文本内容');
+        return normalized;
+      } catch (e) {
+        clearTimeout(t);
+        const name = e && typeof e === 'object' ? e.name : '';
+        const flat = flattenFetchRelatedMessage(e);
+        lastFlat = flat;
+
+        if (name === 'AbortError' || /\babort(ed)?\b/i.test(flat)) {
+          throw new Error(`通义千问请求超时（${Math.round(timeoutMs / 1000)} 秒）`);
+        }
+
+        if (/通义千问请求失败 HTTP /i.test(flat)) {
+          throw e;
+        }
+
+        const transient =
+          isTransientDeepseekFailure(flat) ||
+          (e && typeof e === 'object' && isTransientDeepseekFailure(String(e.cause?.message || '')));
+
+        if (transient && attempt < maxAttempts) {
+          await sleepMs(Math.min(12000, 450 * 2 ** (attempt - 1)) + Math.floor(Math.random() * 280));
           continue;
         }
-        throw new Error(`通义千问请求失败 ${flatHttp}`);
+
+        throw new Error(`${flat}\n\n${buildQwen401Diagnostic(key, triedBases, lastBody)}`);
       }
-
-      const j = await res.json();
-      const rawContent = j?.choices?.[0]?.message?.content;
-      const normalized = normalizeOpenAiAssistantContent(rawContent);
-      if (!normalized) throw new Error('通义千问响应无有效文本内容');
-      return normalized;
-    } catch (e) {
-      clearTimeout(t);
-      const name = e && typeof e === 'object' ? e.name : '';
-      const flat = flattenFetchRelatedMessage(e);
-      lastFlat = flat;
-
-      if (name === 'AbortError' || /\babort(ed)?\b/i.test(flat)) {
-        throw new Error(`通义千问请求超时（${Math.round(timeoutMs / 1000)} 秒）`);
-      }
-
-      const transient =
-        isTransientDeepseekFailure(flat) ||
-        (e && typeof e === 'object' && isTransientDeepseekFailure(String(e.cause?.message || '')));
-
-      if (transient && attempt < maxAttempts) {
-        await sleepMs(Math.min(12000, 450 * 2 ** (attempt - 1)) + Math.floor(Math.random() * 280));
-        continue;
-      }
-
-      throw new Error(
-        `${flat}\n\n请检查：DashScope API Key、Base URL（须以 /v1 结尾的兼容端点）、账号是否开通 VL 模型权限、以及当前网络是否可访问 dashscope.aliyuncs.com。`
-      );
     }
   }
 
-  throw new Error(lastFlat || '通义千问请求失败');
+  throw new Error(`通义千问请求失败 ${lastFlat}\n\n${buildQwen401Diagnostic(key, triedBases, lastBody)}`);
 }
 
 /**
@@ -1154,7 +1297,7 @@ async function dashscopeCompatibleChat(config, messages, options = {}) {
  */
 async function analyzeReferenceImagesWithQwen(cfg, userText, images, logsArr) {
   if (!images?.length) return '';
-  if (!(cfg.qwenApiKey || '').trim()) {
+  if (!sanitizeQwenApiKey(cfg.qwenApiKey)) {
     throw new Error('已添加参考图但未配置「通义千问 API Key」（设置 → API与智能生成）。');
   }
 
