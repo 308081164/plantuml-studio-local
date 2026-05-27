@@ -452,6 +452,74 @@ button:hover {
   background: var(--surface);
 }
 
+/* 参考图：通义 VL 预处理 */
+.agent-ref-images {
+  margin: 0.15rem 0 0.2rem;
+}
+
+.agent-ref-images__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.55rem;
+}
+
+.agent-ref-images__hint {
+  font-size: 0.67rem;
+  color: var(--muted);
+}
+
+.agent-ref-btn {
+  font-size: 0.73rem !important;
+}
+
+.agent-ref-previews {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.38rem;
+  min-height: 0;
+}
+
+.agent-ref-preview {
+  position: relative;
+  width: 4.6rem;
+  height: 3.65rem;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #fff;
+}
+
+.agent-ref-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.agent-ref-preview__rm {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 1.28rem;
+  height: 1.28rem;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  color: #444;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
+}
+
+.agent-ref-preview__rm:hover {
+  color: #cf222e;
+}
+
 /* 智能生成：整块输入卡片（配色参考现代对话产品） */
 .agent-compose {
   display: flex;
@@ -1147,7 +1215,7 @@ body.studio-agent-source-locked #source {
 }
 
 .agent-settings-dialog {
-  max-width: min(720px, 92vw);
+  max-width: min(820px, 92vw);
 }
 
 .agent-settings-body {
@@ -1162,6 +1230,10 @@ body.studio-agent-source-locked #source {
   margin-bottom: 0.75rem;
 }
 
+.agent-field--two {
+  grid-column: 1 / -1;
+}
+
 @media (max-width: 900px) {
   .agent-grid {
     grid-template-columns: 1fr 1fr;
@@ -1171,6 +1243,10 @@ body.studio-agent-source-locked #source {
 @media (max-width: 640px) {
   .agent-grid {
     grid-template-columns: 1fr;
+  }
+
+  .agent-field--two {
+    grid-column: span 1;
   }
 }
 
@@ -1203,6 +1279,15 @@ body.studio-agent-source-locked #source {
 
 .agent-settings-hint p {
   margin: 0 0 0.4rem;
+}
+
+.agent-settings-hint a {
+  color: var(--accent);
+}
+
+.agent-settings-hint--sub {
+  font-size: 0.7rem;
+  line-height: 1.42;
 }
 
 .agent-settings-actions {

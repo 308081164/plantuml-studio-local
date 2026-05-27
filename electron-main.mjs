@@ -88,6 +88,15 @@ let agentSessionLock = null;
 /** 自然语言 Agent 需求最大字符数（与 renderer/app.js 中 AGENT_REQUEST_MAX_CHARS 一致） */
 const AGENT_USER_TEXT_MAX_CHARS = 3000;
 
+/** 附图先经「通义千问 VL」再交 DeepSeek 时的合并正文长度上限（主进程校验） */
+const AGENT_PROMPT_MERGED_MAX_CHARS = 12000;
+
+/** 单次智能生成至多参考图数量 */
+const AGENT_QWEN_REF_IMAGES_MAX = 4;
+
+/** Base64 解码后单图上限（IPC 与安全） */
+const AGENT_QWEN_REF_IMAGE_BYTES_MAX = 2 * 1024 * 1024;
+
 /** 多轮对话：注入 DeepSeek 的历史条数上限（user/assistant 交替） */
 const MAX_AGENT_CHAT_MESSAGES = 16;
 const MAX_AGENT_CHAT_MSG_CHARS = 12000;
@@ -183,6 +192,13 @@ const DEFAULT_AGENT = {
   projectIgnoreGlobs: '',
   /** 国内高校模式开关（生成符合国内标准的流程图） */
   chinaUnivMode: false,
+
+  /** 阿里云 DashScope：用于参考图理解与描述（兼容 OpenAI 风格 /v1/chat/completions），与 DeepSeek 独立 */
+  qwenApiKey: '',
+  /** 例如：https://dashscope.aliyuncs.com/compatible-mode/v1 */
+  qwenBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  /** 建议使用支持视觉能力的模型（如 qwen-vl-max / qwen-vl-plus；以控制台可用名为准） */
+  qwenVisionModel: 'qwen-vl-plus',
 };
 
 function agentConfigPath() {
@@ -213,6 +229,15 @@ function loadAgentConfig() {
           ? j.projectIgnoreGlobs.map(String).join('\n')
           : '',
       chinaUnivMode: j.chinaUnivMode === true || j.chinaUnivMode === 'true',
+      qwenApiKey: typeof j.qwenApiKey === 'string' ? j.qwenApiKey : '',
+      qwenBaseUrl:
+        typeof j.qwenBaseUrl === 'string' && j.qwenBaseUrl.trim()
+          ? j.qwenBaseUrl.trim()
+          : DEFAULT_AGENT.qwenBaseUrl,
+      qwenVisionModel:
+        typeof j.qwenVisionModel === 'string' && j.qwenVisionModel.trim()
+          ? j.qwenVisionModel.trim()
+          : DEFAULT_AGENT.qwenVisionModel,
     };
   } catch {
     return { ...DEFAULT_AGENT };
@@ -230,8 +255,17 @@ function saveAgentConfig(partial) {
       partial.maxRetries != null
         ? Math.max(0, Math.min(15, Number(partial.maxRetries) || 0))
         : cur.maxRetries,
+    qwenBaseUrl:
+      partial.qwenBaseUrl != null
+        ? String(partial.qwenBaseUrl).trim() || DEFAULT_AGENT.qwenBaseUrl
+        : cur.qwenBaseUrl,
+    qwenVisionModel:
+      partial.qwenVisionModel != null
+        ? String(partial.qwenVisionModel).trim() || DEFAULT_AGENT.qwenVisionModel
+        : cur.qwenVisionModel,
   };
   if (partial.apiKey !== undefined) next.apiKey = String(partial.apiKey);
+  if (partial.qwenApiKey !== undefined) next.qwenApiKey = String(partial.qwenApiKey);
   if (partial.lastProjectRoot !== undefined) next.lastProjectRoot = String(partial.lastProjectRoot);
   if (partial.projectIgnoreGlobs !== undefined) next.projectIgnoreGlobs = String(partial.projectIgnoreGlobs);
   if (partial.chinaUnivMode !== undefined) next.chinaUnivMode = partial.chinaUnivMode ? true : false;
@@ -937,6 +971,224 @@ async function deepseekChat(config, messages, options = {}) {
   }
 
   throw new Error(lastFlat || 'DeepSeek 请求失败');
+}
+
+/** 通义千问（DashScope OpenAI 兼容）多模态助手返回的 content 归一化为纯文本 */
+function normalizeOpenAiAssistantContent(raw) {
+  if (raw == null) return '';
+  if (typeof raw === 'string') return raw;
+  if (Array.isArray(raw)) {
+    const parts = [];
+    for (const block of raw) {
+      if (block && typeof block === 'object' && typeof block.text === 'string') {
+        parts.push(block.text);
+      }
+    }
+    return parts.join('\n').trim();
+  }
+  return String(raw);
+}
+
+const QWEN_VISION_ANALYSIS_SYSTEM = [
+  '你是软件工程制图「参考图」分析专家。用户会提供截图、教材插图、白板草稿或手绘示意图，并附文字需求。',
+  '',
+  '请产出【结构化图示说明】文本，供下游另一个仅处理文本的 PlantUML 生成模型使用。务必：',
+  '1) 判断最可能的图示类型（UML 时序/类/组件/用例/状态、活动/流程、Chen ER、WBS、混合等）。',
+  '2) 逐条列出图中的命名元素（参与者、类/对象、模块框、泳道、实体、关系名等），保留原文与层次。',
+  '3) 描述连线/箭头及方向，说明含义（同步调用、异步、返回、包含、泛化、依赖、数据流等）。',
+  '4) 逐字抄录图中清晰可读的文字标注、编号、条件分支文字；看不清的写「不清晰」并简述原因。',
+  '5) 若用户要求一比一复刻，请在结论段用「复刻要点」列出必须与图一致的关键几何/顺序约束。',
+  '6) 默认不要输出完整 PlantUML 源码；若图中结构极简单且你完全有把握，可在最后一节用「可选草稿」给出极简片段，并用「需人工核对」注明。',
+  '',
+  '输出中文，使用清晰小标题（如「元素清单」「连接关系」「图中文字」）。',
+].join('\n');
+
+/**
+ * @param {unknown} raw
+ * @returns {{ mimeType: string, dataBase64: string }[]}
+ */
+function sanitizeReferenceImagesForQwen(raw) {
+  const allowed = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif']);
+  const out = [];
+  if (!Array.isArray(raw)) return out;
+  for (const it of raw) {
+    if (out.length >= AGENT_QWEN_REF_IMAGES_MAX) break;
+    let mime = String(it?.mimeType || it?.mime || '')
+      .trim()
+      .toLowerCase();
+    if (mime === 'image/jpg') mime = 'image/jpeg';
+    if (!allowed.has(mime)) continue;
+    let b64 = String(it?.dataBase64 || '').replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
+    if (!b64 || b64.length % 4 === 1 || !/^[a-zA-Z0-9+/=]+$/.test(b64)) continue;
+    try {
+      const buf = Buffer.from(b64, 'base64');
+      if (!buf.length || buf.length > AGENT_QWEN_REF_IMAGE_BYTES_MAX) continue;
+    } catch {
+      continue;
+    }
+    out.push({ mimeType: mime, dataBase64: b64 });
+  }
+  return out;
+}
+
+function mergeUserTextWithVisionSummary(userText, visionSummary, maxChars) {
+  const u = String(userText || '').trim();
+  const sep = '\n\n===== 【附图理解（通义千问 VL）】 =====\n';
+  const vs = String(visionSummary || '').trim();
+  let merged = `${u}${sep}${vs}`;
+  if (merged.length <= maxChars) return merged;
+  const avail = Math.max(400, maxChars - u.length - sep.length - 80);
+  let body = vs;
+  if (body.length > avail) {
+    body = `${body.slice(0, avail)}\n…（图示说明过长，已截断以控制总长度）`;
+  }
+  merged = `${u}${sep}${body}`;
+  if (merged.length > maxChars) merged = merged.slice(0, maxChars);
+  return merged.trim();
+}
+
+/**
+ * DashScope-compatible OpenAI：`/v1/chat/completions`，支持多模态 user content 数组。
+ */
+async function dashscopeCompatibleChat(config, messages, options = {}) {
+  const base = String(config.qwenBaseUrl || '')
+    .trim()
+    .replace(/\/$/, '');
+  if (!base) throw new Error('未配置通义千问 Base URL');
+  const url = `${base}/chat/completions`;
+  const key = String(config.qwenApiKey || '').trim();
+  if (!key) throw new Error('未配置通义千问 API Key');
+
+  const model =
+    typeof options.model === 'string' && options.model.trim()
+      ? options.model.trim()
+      : String(config.qwenVisionModel || '').trim() || DEFAULT_AGENT.qwenVisionModel;
+
+  const temperature =
+    typeof options.temperature === 'number' && Number.isFinite(options.temperature)
+      ? Math.min(1.5, Math.max(0, options.temperature))
+      : 0.12;
+
+  const maxTokens =
+    typeof options.max_tokens === 'number' && Number.isFinite(options.max_tokens)
+      ? Math.max(256, Math.min(8192, options.max_tokens))
+      : 4096;
+
+  const timeoutMs =
+    typeof options.timeoutMs === 'number' && Number.isFinite(options.timeoutMs)
+      ? Math.max(15000, Math.min(240000, options.timeoutMs))
+      : 180000;
+
+  const maxAttempts = Math.max(1, Math.min(6, Number(options.fetchMaxAttempts) || 4));
+
+  const bodyObj = { model, messages, temperature, max_tokens: maxTokens };
+  const body = JSON.stringify(bodyObj);
+  let lastFlat = '';
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${key}`,
+        },
+        body,
+        signal: controller.signal,
+      });
+      clearTimeout(t);
+
+      if (!res.ok) {
+        const t2 = await res.text();
+        const flatHttp = `HTTP ${res.status}: ${t2.slice(0, 1200)}`;
+        lastFlat = flatHttp;
+        const retryable = [408, 425, 429, 500, 502, 503, 504].includes(res.status);
+        if (retryable && attempt < maxAttempts) {
+          await sleepMs(Math.min(12000, 450 * 2 ** (attempt - 1)) + Math.floor(Math.random() * 260));
+          continue;
+        }
+        throw new Error(`通义千问请求失败 ${flatHttp}`);
+      }
+
+      const j = await res.json();
+      const rawContent = j?.choices?.[0]?.message?.content;
+      const normalized = normalizeOpenAiAssistantContent(rawContent);
+      if (!normalized) throw new Error('通义千问响应无有效文本内容');
+      return normalized;
+    } catch (e) {
+      clearTimeout(t);
+      const name = e && typeof e === 'object' ? e.name : '';
+      const flat = flattenFetchRelatedMessage(e);
+      lastFlat = flat;
+
+      if (name === 'AbortError' || /\babort(ed)?\b/i.test(flat)) {
+        throw new Error(`通义千问请求超时（${Math.round(timeoutMs / 1000)} 秒）`);
+      }
+
+      const transient =
+        isTransientDeepseekFailure(flat) ||
+        (e && typeof e === 'object' && isTransientDeepseekFailure(String(e.cause?.message || '')));
+
+      if (transient && attempt < maxAttempts) {
+        await sleepMs(Math.min(12000, 450 * 2 ** (attempt - 1)) + Math.floor(Math.random() * 280));
+        continue;
+      }
+
+      throw new Error(
+        `${flat}\n\n请检查：DashScope API Key、Base URL（须以 /v1 结尾的兼容端点）、账号是否开通 VL 模型权限、以及当前网络是否可访问 dashscope.aliyuncs.com。`
+      );
+    }
+  }
+
+  throw new Error(lastFlat || '通义千问请求失败');
+}
+
+/**
+ * @param {Record<string, unknown>} cfg
+ * @param {string} userText
+ * @param {{ mimeType: string, dataBase64: string }[]} images
+ * @param {string[]} logsArr
+ * @returns {Promise<string>}
+ */
+async function analyzeReferenceImagesWithQwen(cfg, userText, images, logsArr) {
+  if (!images?.length) return '';
+  if (!(cfg.qwenApiKey || '').trim()) {
+    throw new Error('已添加参考图但未配置「通义千问 API Key」（设置 → API与智能生成）。');
+  }
+
+  const userInstruction =
+    String(userText || '').trim() || '用户未附额外说明；请仅根据参考图输出结构化图示说明。';
+
+  const contentParts = [];
+  for (const im of images) {
+    const mime = im.mimeType.includes('/') ? im.mimeType : 'image/png';
+    contentParts.push({
+      type: 'image_url',
+      image_url: { url: `data:${mime};base64,${im.dataBase64}` },
+    });
+  }
+
+  contentParts.push({
+    type: 'text',
+    text: [`【用户文字需求】`, userInstruction].join('\n'),
+  });
+
+  const modelLabel = String(cfg.qwenVisionModel || DEFAULT_AGENT.qwenVisionModel).trim();
+  logsArr.push(`[vision] 调用通义千问 VL：model=${modelLabel}，参考图 ${images.length} 张`);
+
+  const out = await dashscopeCompatibleChat(
+    cfg,
+    [
+      { role: 'system', content: QWEN_VISION_ANALYSIS_SYSTEM },
+      { role: 'user', content: contentParts },
+    ],
+    { temperature: 0.1, max_tokens: 4096, timeoutMs: 180000 }
+  );
+
+  logsArr.push(`[vision] VL 输出约 ${out.length} 字符`);
+  return out.trim();
 }
 
 /**
@@ -1903,27 +2155,61 @@ function registerIpcHandlers() {
       const gate = gateFromSnapshot(snap);
       if (gate) return { ...gate, logs: [gate.error] };
       const p = payload != null && typeof payload === 'object' ? payload : { userText: payload };
-      const text = String(p.userText ?? '').trim();
+      const baseUserText = String(p.userText ?? '').trim();
       const projectRoot = p.projectRoot != null ? String(p.projectRoot).trim() : '';
       const ignoreGlobsText = p.ignoreGlobsText;
-      if (!text) return { ok: false, error: '请输入自然语言需求', logs: [] };
-      if (text.length > AGENT_USER_TEXT_MAX_CHARS) {
+      if (!baseUserText) return { ok: false, error: '请输入自然语言需求', logs: [] };
+
+      const cfgFull = loadAgentConfig();
+      const sanitizedImgs = sanitizeReferenceImagesForQwen(p.referenceImages ?? p.reference_images);
+      /** @type {string[]} */
+      const visionLogs = [];
+
+      /** @type {string} */
+      let effectiveText = baseUserText;
+      try {
+        if (sanitizedImgs.length > 0) {
+          const visionMd = await analyzeReferenceImagesWithQwen(cfgFull, baseUserText, sanitizedImgs, visionLogs);
+          effectiveText = mergeUserTextWithVisionSummary(
+            baseUserText,
+            visionMd,
+            AGENT_PROMPT_MERGED_MAX_CHARS
+          );
+        }
+      } catch (ve) {
+        const vm = String(ve.message || ve);
+        return { ok: false, error: vm, logs: [...visionLogs, vm] };
+      }
+
+      const textUpperBound =
+        sanitizedImgs.length > 0 ? AGENT_PROMPT_MERGED_MAX_CHARS : AGENT_USER_TEXT_MAX_CHARS;
+      if (effectiveText.length > textUpperBound) {
         return {
           ok: false,
-          error: `自然语言需求最长 ${AGENT_USER_TEXT_MAX_CHARS} 字`,
-          logs: [],
+          error: sanitizedImgs.length
+            ? `附图理解后与原文合并超长（>${textUpperBound} 字符），请缩短文字需求或减少参考图信息量。`
+            : `自然语言需求最长 ${AGENT_USER_TEXT_MAX_CHARS} 字`,
+          logs: [...visionLogs],
         };
       }
       const conversationHistory = Array.isArray(p.conversationHistory) ? p.conversationHistory : [];
       const editorSource =
         p.editorSource !== undefined && p.editorSource !== null ? String(p.editorSource) : '';
-      const r = await runAgentPipelineAdaptive(text, projectRoot, ignoreGlobsText, conversationHistory, editorSource);
+      const r = await runAgentPipelineAdaptive(
+        effectiveText,
+        projectRoot,
+        ignoreGlobsText,
+        conversationHistory,
+        editorSource
+      );
       if (r?.ok) maybeConsumeFreeAfterSuccess(snap);
       const unlock = shouldUnlockAgentContent(snap);
+      const mergedLogs = [...visionLogs, ...(Array.isArray(r.logs) ? r.logs : [])];
       if (r.ok && !unlock) {
         setAgentSessionLock(r.source);
         return {
           ...r,
+          logs: mergedLogs,
           locked: true,
           displaySource: buildLockedEditorPlaceholder(),
         };
@@ -1931,7 +2217,7 @@ function registerIpcHandlers() {
       if (r.ok && unlock) {
         clearAgentSessionLock();
       }
-      return { ...r, locked: false, displaySource: r.source };
+      return { ...r, logs: mergedLogs, locked: false, displaySource: r.source };
     } catch (e) {
       const msg = String(e.message || e);
       return { ok: false, error: msg, logs: [msg] };
