@@ -58,6 +58,10 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add package.json package-lock.json
           git commit -m "chore(release): v${NEW_VERSION} [skip ci]"
+          if git rev-parse "refs/tags/v${NEW_VERSION}" >/dev/null 2>&1; then
+            echo "Tag v${NEW_VERSION} already exists; re-run ci-bump-version after syncing tags."
+            exit 1
+          fi
           git tag -a "v${NEW_VERSION}" -m "Release v${NEW_VERSION}"
           git push origin "HEAD:${GITHUB_REF_NAME}"
           git push origin "refs/tags/v${NEW_VERSION}"
