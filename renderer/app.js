@@ -459,18 +459,26 @@ function renderMarkdownHelpArticle(markdown) {
 async function openHelpPlantumlDialog() {
   const dlg = $('help-plantuml-dialog');
   const body = $('help-plantuml-body');
-  if (!dlg || !body || !window.studio?.helpPlantumlGuide) return;
+  if (!dlg || !body) return;
+  if (!window.studio?.helpPlantumlGuide) {
+    showToast('语法速查接口未就绪，请重启应用后重试', 'error');
+    return;
+  }
   body.innerHTML = '<p>正在加载…</p>';
   dlg.showModal();
   try {
     const r = await window.studio.helpPlantumlGuide();
     if (!r?.ok) {
-      body.innerHTML = `<p>${r?.error || '加载失败'}</p>`;
+      const msg = r?.error || '加载失败';
+      body.innerHTML = `<p>${msg}</p>`;
+      showToast(msg, 'error');
       return;
     }
     body.innerHTML = renderMarkdownHelpArticle(r.markdown);
   } catch (e) {
-    body.innerHTML = `<p>${String(e.message || e)}</p>`;
+    const msg = String(e.message || e);
+    body.innerHTML = `<p>${msg}</p>`;
+    showToast(msg, 'error');
   }
 }
 
@@ -3035,6 +3043,10 @@ function wireLicenseDialog() {
     await refreshLicenseStatus();
     if (typeof dlg.showModal === 'function') dlg.showModal();
   };
+
+  $('btn-app-version')?.addEventListener('click', () => {
+    void window.openLicenseDialog();
+  });
 
   if (window.studio?.onMenuLicense) {
     window.studio.onMenuLicense(() => {

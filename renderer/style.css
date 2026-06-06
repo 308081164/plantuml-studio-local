@@ -164,6 +164,24 @@ body.studio-edition-pro .topbar {
   padding: 0.08rem 0.3rem;
 }
 
+button.project-badge--clickable {
+  font-family: inherit;
+  background: rgba(31, 111, 235, 0.06);
+  cursor: pointer;
+  line-height: 1.3;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+button.project-badge--clickable:hover {
+  background: rgba(31, 111, 235, 0.14);
+  border-color: #1a5fcc;
+}
+
+button.project-badge--clickable:focus-visible {
+  outline: 2px solid rgba(31, 111, 235, 0.45);
+  outline-offset: 2px;
+}
+
 .project-path {
   font-size: 0.72rem;
   color: var(--muted);
@@ -1556,6 +1574,36 @@ body.studio-agent-source-locked #source {
   font-size: 0.75rem;
   color: var(--muted);
   line-height: 1.4;
+}
+
+.license-purchase-guide {
+  margin: 0 0 1rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid rgba(224, 176, 96, 0.55);
+  background: linear-gradient(180deg, #fffaf0 0%, #fff4df 100%);
+}
+
+.license-purchase-guide .license-section-title {
+  margin-bottom: 0.35rem;
+  border-bottom-color: rgba(224, 176, 96, 0.45);
+}
+
+.license-support-list {
+  margin: 0.45rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.license-support-list li + li {
+  margin-top: 0.25rem;
+}
+
+.license-support-list strong {
+  color: var(--text);
+  font-weight: 600;
 }
 
 .license-activate-area {

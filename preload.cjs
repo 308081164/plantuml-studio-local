@@ -85,6 +85,13 @@ contextBridge.exposeInMainWorld('studio', {
       menuLicenseHandler = null;
     };
   },
+  onMenuPlantumlGuide: (cb) => {
+    menuPlantumlGuideHandler = typeof cb === 'function' ? cb : null;
+    return () => {
+      menuPlantumlGuideHandler = null;
+    };
+  },
+  helpPlantumlGuide: () => ipcRenderer.invoke('studio:help-plantuml-guide'),
   errorArchiveAppend: (payload) => ipcRenderer.invoke('studio:error-archive-append', payload),
   errorArchiveRead: () => ipcRenderer.invoke('studio:error-archive-read'),
   stashList: () => ipcRenderer.invoke('studio:stash-list'),
