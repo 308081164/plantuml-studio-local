@@ -10,11 +10,12 @@
     "start": "electron .",
     "prepare:jre": "node scripts/download-jre.mjs",
     "prepare:plantuml": "node scripts/download-plantuml-jar.mjs",
+    "prepare:fonts": "node scripts/download-bundled-fonts.mjs",
     "pack": "electron-builder --dir",
-    "dist": "npm run prepare:jre && npm run prepare:plantuml && electron-builder --win --x64",
-    "dist:beta": "npm run prepare:jre && npm run prepare:plantuml && electron-builder --win --x64",
-    "dist:portable": "npm run prepare:jre && npm run prepare:plantuml && electron-builder --win --x64 portable",
-    "dist:nsis": "npm run prepare:jre && npm run prepare:plantuml && electron-builder --win --x64 nsis",
+    "dist": "npm run prepare:jre && npm run prepare:plantuml && npm run prepare:fonts && electron-builder --win --x64",
+    "dist:beta": "npm run prepare:jre && npm run prepare:plantuml && npm run prepare:fonts && electron-builder --win --x64",
+    "dist:portable": "npm run prepare:jre && npm run prepare:plantuml && npm run prepare:fonts && electron-builder --win --x64 portable",
+    "dist:nsis": "npm run prepare:jre && npm run prepare:plantuml && npm run prepare:fonts && electron-builder --win --x64 nsis",
     "sync:keygen-license": "node scripts/sync-keygen-license.mjs"
   },
   "build": {
@@ -41,6 +42,8 @@
       "scripts/reference-vision-pipeline.mjs",
       "scripts/china-univ-activity-sanitize.mjs",
       "scripts/plantuml-font.mjs",
+      "scripts/bundled-fonts-runtime.mjs",
+      "scripts/download-bundled-fonts.mjs",
       "scripts/diagram-grammar.mjs",
       "scripts/studio-arch-graph.mjs",
       "scripts/arch-agent-prompt.mjs",
@@ -67,6 +70,15 @@
         "to": "kb",
         "filter": [
           "*.md"
+        ]
+      },
+      {
+        "from": "vendor/fonts",
+        "to": "fonts",
+        "filter": [
+          "*.ttf",
+          "*.otf",
+          "OFL*.txt"
         ]
       }
     ],

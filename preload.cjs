@@ -36,6 +36,7 @@ function base64ToArrayBuffer(b64) {
 
 contextBridge.exposeInMainWorld('studio', {
   getApiBase: () => ipcRenderer.invoke('studio:get-api-base'),
+  bundledFontsStatus: () => ipcRenderer.invoke('studio:bundled-fonts-status'),
   /** 收回主窗口与 WebContents 焦点（修复部分环境下输入框无法再键入的问题） */
   focusMainRenderer: () => ipcRenderer.invoke('studio:focus-main-renderer'),
   onServerLog: (cb) => {

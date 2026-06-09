@@ -175,16 +175,18 @@
           <div class="preview-pane-title__main">
             预览 <span class="pane-sub">右键可复制 PNG 到剪贴板</span>
           </div>
-          <label class="preview-font-label" title="渲染前注入 PlantUML skinparam defaultFontName；需本机已安装对应字体">
+          <label class="preview-font-label" title="渲染前注入 PlantUML skinparam defaultFontName；优先使用安装包内置思源字体">
             预览字体
-            <select id="preview-font" class="preview-font-select">
+            <select id="preview-font" class="preview-font-select" title="「安装包内置」为打包字体，无需系统已装宋体/黑体">
               <option value="">默认（跟随源码）</option>
-              <option value="simsun">宋体</option>
-              <option value="simhei">黑体</option>
-              <option value="yahei">微软雅黑</option>
-              <option value="kaiti">楷体</option>
-              <option value="fangsong">仿宋</option>
-              <option value="arial">Arial</option>
+              <option value="noto-sans-bundled">思源黑体（安装包内置）</option>
+              <option value="noto-serif-bundled">思源宋体（安装包内置）</option>
+              <option value="simsun">宋体（系统）</option>
+              <option value="simhei">黑体（系统）</option>
+              <option value="yahei">微软雅黑（系统）</option>
+              <option value="kaiti">楷体（系统）</option>
+              <option value="fangsong">仿宋（系统）</option>
+              <option value="arial">Arial（系统）</option>
             </select>
           </label>
           <div class="pane-actions">

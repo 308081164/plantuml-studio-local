@@ -1,7 +1,11 @@
 import { stripChinaUnivActivityStartEndStereotypes } from '../scripts/china-univ-activity-sanitize.mjs';
 import { isLockedPlaceholderText } from '../scripts/agent-session-lock.mjs';
 import { parseEditorDocument } from '../scripts/diagram-grammar.mjs';
-import { applyPreviewFontToSource, PREVIEW_FONT_PRESETS } from '../scripts/plantuml-font.mjs';
+import {
+  applyPreviewFontToSource,
+  PREVIEW_FONT_PRESETS,
+  DEFAULT_BUNDLED_PREVIEW_FONT_ID,
+} from '../scripts/plantuml-font.mjs';
 import { sortSkillsForMenu } from './agent-skills.mjs';
 
 const STUDIO_PREVIEW_FONT_KEY = 'studio_preview_font';
@@ -1092,13 +1096,23 @@ function getPreviewFontId() {
   return el ? String(el.value || '') : '';
 }
 
-function loadPreviewFontPreference() {
+async function loadPreviewFontPreference() {
   const el = $('preview-font');
   if (!el) return;
   try {
     const saved = localStorage.getItem(STUDIO_PREVIEW_FONT_KEY);
     if (saved && PREVIEW_FONT_PRESETS.some((p) => p.id === saved)) {
       el.value = saved;
+      return;
+    }
+    let defaultId = DEFAULT_BUNDLED_PREVIEW_FONT_ID;
+    if (window.studio?.bundledFontsStatus) {
+      const st = await window.studio.bundledFontsStatus();
+      if (!st?.available) defaultId = '';
+    }
+    if (defaultId && PREVIEW_FONT_PRESETS.some((p) => p.id === defaultId)) {
+      el.value = defaultId;
+      savePreviewFontPreference(defaultId);
     }
   } catch {
     /* ignore */
@@ -2682,7 +2696,7 @@ function init() {
   $('source').value = DEFAULT_SOURCE;
   $('btn-render').addEventListener('click', () => render());
 
-  loadPreviewFontPreference();
+  void loadPreviewFontPreference();
   $('preview-font')?.addEventListener('change', () => {
     const fontId = getPreviewFontId();
     savePreviewFontPreference(fontId);

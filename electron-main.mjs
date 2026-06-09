@@ -79,6 +79,12 @@ import { parseEditorDocument } from './scripts/diagram-grammar.mjs';
 import { stripChinaUnivActivityStartEndStereotypes } from './scripts/china-univ-activity-sanitize.mjs';
 import { renderStudioArchSvg } from './scripts/studio-arch-graph.mjs';
 import { buildLockedEditorPlaceholder } from './scripts/agent-session-lock.mjs';
+import {
+  buildJavaFontJvmArgs,
+  bundledFontsAvailable,
+  resolveBundledFontsDir,
+  DEFAULT_BUNDLED_PREVIEW_FONT_ID,
+} from './scripts/bundled-fonts-runtime.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -2262,9 +2268,18 @@ async function startPicoWeb() {
   }
 
   const javaExe = resolveJavaExecutable();
+  const fontsDir = resolveBundledFontsDir({
+    resourcesPath: process.resourcesPath,
+    appDirname: __dirname,
+    isPackaged: app.isPackaged,
+  });
+  const fontJvmArgs = buildJavaFontJvmArgs(javaExe, fontsDir);
+  if (fontJvmArgs.length) {
+    forwardLog(`[fonts] 已注册安装包内置字体（${fontsDir}）`);
+  }
 
   return new Promise((resolve, reject) => {
-    javaChild = spawn(javaExe, ['-Djava.awt.headless=true', '-jar', jar, '--http-server:0'], {
+    javaChild = spawn(javaExe, ['-Djava.awt.headless=true', ...fontJvmArgs, '-jar', jar, '--http-server:0'], {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });
@@ -2618,6 +2633,21 @@ function registerIpcHandlers() {
     if (!snap || snap.level === 'blocked') return false;
     return snap.level === 'license' || snap.level === 'monthly' || snap.level === 'free';
   }
+
+  ipcMain.handle('studio:bundled-fonts-status', () => {
+    const fontsDir = resolveBundledFontsDir({
+      resourcesPath: process.resourcesPath,
+      appDirname: __dirname,
+      isPackaged: app.isPackaged,
+    });
+    const available = bundledFontsAvailable(fontsDir);
+    return {
+      ok: true,
+      available,
+      defaultFontId: available ? DEFAULT_BUNDLED_PREVIEW_FONT_ID : '',
+      fontsDir: available ? fontsDir : '',
+    };
+  });
 
   ipcMain.handle('studio:get-api-base', () => apiBase);
 

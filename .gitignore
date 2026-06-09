@@ -32,6 +32,9 @@ vendor/_jre_extract/
 vendor/*.zip
 vendor/plantuml/plantuml-*.jar
 !vendor/plantuml/
+vendor/fonts/*.ttf
+vendor/fonts/*.otf
+!vendor/fonts/
 !vendor/kb/
 !vendor/kb/*
 

@@ -1,18 +1,23 @@
 /**
  * 预览区字体：在渲染/导出前向 PlantUML 源码注入 skinparam defaultFontName。
- * 依赖本机已安装对应字体（Windows 常见：SimSun / SimHei / Microsoft YaHei 等）。
+ * 「安装包内置」项依赖 bundled-fonts-runtime 将 Noto 字体注册到捆绑 JRE；
+ * 系统字体项依赖 Windows 已安装字体。
  */
 
-/** @type {{ id: string, label: string, name: string }[]} */
+/** @type {{ id: string, label: string, name: string, bundled?: boolean }[]} */
 export const PREVIEW_FONT_PRESETS = [
   { id: '', label: '默认（跟随源码）', name: '' },
-  { id: 'simsun', label: '宋体', name: 'SimSun' },
-  { id: 'simhei', label: '黑体', name: 'SimHei' },
-  { id: 'yahei', label: '微软雅黑', name: 'Microsoft YaHei' },
-  { id: 'kaiti', label: '楷体', name: 'KaiTi' },
-  { id: 'fangsong', label: '仿宋', name: 'FangSong' },
-  { id: 'arial', label: 'Arial', name: 'Arial' },
+  { id: 'noto-sans-bundled', label: '思源黑体（安装包内置）', name: 'Noto Sans SC', bundled: true },
+  { id: 'noto-serif-bundled', label: '思源宋体（安装包内置）', name: 'Noto Serif SC', bundled: true },
+  { id: 'simsun', label: '宋体（系统）', name: 'SimSun' },
+  { id: 'simhei', label: '黑体（系统）', name: 'SimHei' },
+  { id: 'yahei', label: '微软雅黑（系统）', name: 'Microsoft YaHei' },
+  { id: 'kaiti', label: '楷体（系统）', name: 'KaiTi' },
+  { id: 'fangsong', label: '仿宋（系统）', name: 'FangSong' },
+  { id: 'arial', label: 'Arial（系统）', name: 'Arial' },
 ];
+
+export const DEFAULT_BUNDLED_PREVIEW_FONT_ID = 'noto-sans-bundled';
 
 const DIAGRAM_START_RE = /@(startuml|startchen|startwbs)\b/i;
 const DEFAULT_FONT_LINE_RE = /^\s*skinparam\s+defaultFontName\s+[^\n]+\n?/gim;
