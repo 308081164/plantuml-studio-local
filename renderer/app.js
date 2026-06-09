@@ -1,7 +1,10 @@
 import { stripChinaUnivActivityStartEndStereotypes } from '../scripts/china-univ-activity-sanitize.mjs';
 import { isLockedPlaceholderText } from '../scripts/agent-session-lock.mjs';
 import { parseEditorDocument } from '../scripts/diagram-grammar.mjs';
+import { applyPreviewFontToSource, PREVIEW_FONT_PRESETS } from '../scripts/plantuml-font.mjs';
 import { sortSkillsForMenu } from './agent-skills.mjs';
+
+const STUDIO_PREVIEW_FONT_KEY = 'studio_preview_font';
 
 /** Agent 自然语言输入框最大字符数（PlantUML 源码 #source 不设字数上限） */
 const AGENT_REQUEST_MAX_CHARS = 3000;
@@ -1084,6 +1087,41 @@ skinparam activity {
   return result;
 }
 
+function getPreviewFontId() {
+  const el = $('preview-font');
+  return el ? String(el.value || '') : '';
+}
+
+function loadPreviewFontPreference() {
+  const el = $('preview-font');
+  if (!el) return;
+  try {
+    const saved = localStorage.getItem(STUDIO_PREVIEW_FONT_KEY);
+    if (saved && PREVIEW_FONT_PRESETS.some((p) => p.id === saved)) {
+      el.value = saved;
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function savePreviewFontPreference(fontId) {
+  try {
+    if (fontId) localStorage.setItem(STUDIO_PREVIEW_FONT_KEY, fontId);
+    else localStorage.removeItem(STUDIO_PREVIEW_FONT_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 渲染/导出前：高校模式预处理 + 预览区字体 skinparam 注入（不改编辑器原文） */
+function prepareSourceForRender(rawSource) {
+  let s = String(rawSource ?? '');
+  if (isChinaUnivMode) s = applyChinaUnivModeIfNeeded(s);
+  s = applyPreviewFontToSource(s, getPreviewFontId());
+  return s;
+}
+
 /** 源码框内容注入 Agent（免费版占位则跳过，避免把锁定提示送给模型） */
 function getEditorSourceForAgent() {
   const el = document.getElementById('source');
@@ -1210,8 +1248,7 @@ async function render() {
   }
 
   const rawSource = bundle.source;
-  let sourceToRender = rawSource;
-  if (isChinaUnivMode) sourceToRender = applyChinaUnivModeIfNeeded(rawSource);
+  let sourceToRender = prepareSourceForRender(rawSource);
   const univChangedSource = sourceToRender !== rawSource;
 
   try {
@@ -1313,9 +1350,8 @@ async function exportFile() {
   const ext = fmt === '-tsvg' ? 'svg' : 'png';
   setStatus('导出中…', null);
 
-  let sourceToExport = bundle.source;
-  let rawExport = bundle.source;
-  if (isChinaUnivMode) sourceToExport = applyChinaUnivModeIfNeeded(rawExport);
+  const rawExport = bundle.source;
+  let sourceToExport = prepareSourceForRender(rawExport);
   const univChangedExport = sourceToExport !== rawExport;
 
   try {
@@ -2645,6 +2681,19 @@ function init() {
 
   $('source').value = DEFAULT_SOURCE;
   $('btn-render').addEventListener('click', () => render());
+
+  loadPreviewFontPreference();
+  $('preview-font')?.addEventListener('change', () => {
+    const fontId = getPreviewFontId();
+    savePreviewFontPreference(fontId);
+    const label = PREVIEW_FONT_PRESETS.find((p) => p.id === fontId)?.label || '默认';
+    if (previewHasContent()) {
+      showToast(`预览字体已切换为「${label}」，正在重新渲染…`, 'info');
+      void render();
+    } else {
+      showToast(`预览字体：${label}（下次渲染生效）`, 'info');
+    }
+  });
   $('btn-export').addEventListener('click', () => exportFile());
   $('btn-pay-mock-local')?.addEventListener('click', () => runLocalMockPaySuccess());
   $('btn-pay-unlock')?.addEventListener('click', () => beginPayUnlockFlow());

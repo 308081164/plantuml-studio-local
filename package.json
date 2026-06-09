@@ -40,6 +40,7 @@
       "scripts/kb-inject.mjs",
       "scripts/reference-vision-pipeline.mjs",
       "scripts/china-univ-activity-sanitize.mjs",
+      "scripts/plantuml-font.mjs",
       "scripts/diagram-grammar.mjs",
       "scripts/studio-arch-graph.mjs",
       "scripts/arch-agent-prompt.mjs",
