@@ -1411,7 +1411,98 @@ function previewHasContent() {
   return imgEl && svgWrap && (!imgEl.classList.contains('hidden') || !svgWrap.classList.contains('hidden'));
 }
 
-/** 将当前预览以 PNG 写入系统剪贴板（SVG 预览时按当前源码重新渲染 PNG） */
+/** 读取 SVG 内在尺寸（viewBox / width+height / getBBox），供栅格化复制使用 */
+function getSvgNaturalSize(svg) {
+  const vb = svg.viewBox?.baseVal;
+  if (vb && vb.width > 0 && vb.height > 0) {
+    return { width: vb.width, height: vb.height };
+  }
+  const w = parseFloat(String(svg.getAttribute('width') || '').replace(/px$/i, ''));
+  const h = parseFloat(String(svg.getAttribute('height') || '').replace(/px$/i, ''));
+  if (Number.isFinite(w) && w > 0 && Number.isFinite(h) && h > 0) {
+    return { width: w, height: h };
+  }
+  try {
+    const bb = svg.getBBox();
+    if (bb.width > 0 && bb.height > 0) {
+      return { width: bb.width, height: bb.height };
+    }
+  } catch {
+    /* ignore */
+  }
+  return { width: 0, height: 0 };
+}
+
+/** 将预览区 SVG 元素栅格化为 PNG ArrayBuffer（与所见预览一致，避免宽图右侧被裁切） */
+function svgElementToPngArrayBuffer(svgEl, { scale = 2 } = {}) {
+  const MAX_CANVAS_DIM = 16384;
+  return new Promise((resolve, reject) => {
+    const { width, height } = getSvgNaturalSize(svgEl);
+    if (width <= 0 || height <= 0) {
+      reject(new Error('无法获取 SVG 尺寸'));
+      return;
+    }
+
+    let effectiveScale = scale;
+    while (
+      Math.ceil(width * effectiveScale) > MAX_CANVAS_DIM ||
+      Math.ceil(height * effectiveScale) > MAX_CANVAS_DIM
+    ) {
+      effectiveScale /= 2;
+      if (effectiveScale < 0.25) {
+        reject(new Error('SVG 尺寸过大，无法栅格化'));
+        return;
+      }
+    }
+
+    const svg = svgEl.cloneNode(true);
+    svg.setAttribute('width', String(width));
+    svg.setAttribute('height', String(height));
+    if (!svg.getAttribute('xmlns')) {
+      svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    }
+    if (!svg.getAttribute('xmlns:xlink')) {
+      svg.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+    }
+
+    const svgData = new XMLSerializer().serializeToString(svg);
+    const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+
+    img.onload = () => {
+      try {
+        const cw = Math.ceil(width * effectiveScale);
+        const ch = Math.ceil(height * effectiveScale);
+        const canvas = document.createElement('canvas');
+        canvas.width = cw;
+        canvas.height = ch;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, cw, ch);
+        ctx.drawImage(img, 0, 0, cw, ch);
+        canvas.toBlob((pngBlob) => {
+          URL.revokeObjectURL(url);
+          if (!pngBlob) {
+            reject(new Error('PNG 编码失败'));
+            return;
+          }
+          pngBlob.arrayBuffer().then(resolve).catch(reject);
+        }, 'image/png');
+      } catch (e) {
+        URL.revokeObjectURL(url);
+        reject(e);
+      }
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('SVG 加载失败'));
+    };
+    img.src = url;
+  });
+}
+
+/** 将当前预览以 PNG 写入系统剪贴板（SVG 预览时优先栅格化当前预览 SVG，与所见一致） */
 async function copyPreviewPngToClipboard() {
   if (await isUiAgentLocked()) {
     setStatus('免费版：锁定状态下无法复制预览图', false);
@@ -1457,7 +1548,22 @@ async function copyPreviewPngToClipboard() {
         setStatus('静态架构图为 SVG：请使用「导出」下载，或从预览区复制 SVG 源码（暂不支持转 PNG 剪贴板）', false);
         return;
       }
-      const source = bundle.source;
+
+      const svgEl = svgWrap.querySelector('svg');
+      if (svgEl) {
+        try {
+          const buf = await svgElementToPngArrayBuffer(svgEl);
+          const out = await window.studio.copyPngToClipboard(buf);
+          if (out?.ok) {
+            setStatus('已复制 PNG 到剪贴板', true);
+            return;
+          }
+        } catch {
+          /* 栅格化失败时回退到 PlantUML 重新渲染 */
+        }
+      }
+
+      const source = prepareSourceForRender(bundle.source);
       const png = await window.studio.renderPngToBuffer(source);
       if (!png?.ok) {
         setStatus(png?.error || '无法从 SVG 模式生成 PNG', false);

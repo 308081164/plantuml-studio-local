@@ -2279,7 +2279,10 @@ async function startPicoWeb() {
   }
 
   return new Promise((resolve, reject) => {
-    javaChild = spawn(javaExe, ['-Djava.awt.headless=true', ...fontJvmArgs, '-jar', jar, '--http-server:0'], {
+    javaChild = spawn(
+      javaExe,
+      ['-Djava.awt.headless=true', '-DPLANTUML_LIMIT_SIZE=16384', ...fontJvmArgs, '-jar', jar, '--http-server:0'],
+      {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });
