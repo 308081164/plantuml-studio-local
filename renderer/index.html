@@ -475,10 +475,14 @@
         </section>
         <div id="license-device-area" class="license-device-area hidden">
           <div class="license-section-title">设备信息</div>
-          <div class="license-device-row">
+          <div class="license-device-row license-device-row--hw-id">
             <span class="license-device-label">设备指纹 (HW_ID)：</span>
-            <code id="license-hw-id" class="license-device-value"></code>
+            <code id="license-hw-id" class="license-device-value license-device-value--hw-id" title="完整 64 位设备指纹"></code>
+            <button type="button" id="btn-license-copy-hw-id" class="ghost" title="复制完整 HW_ID">复制</button>
           </div>
+          <p class="license-hint license-hint--hw-id">
+            上方为完整 64 位 HW_ID（非 16 位缩写）。管理员在「密钥生成器」中生成永久激活码时需要粘贴此值；也可点击「复制」后发给管理员。
+          </p>
           <div class="license-device-row">
             <span class="license-device-label">激活设备码：</span>
             <code id="license-device-code" class="license-device-value license-device-code"></code>

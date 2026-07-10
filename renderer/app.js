@@ -3079,7 +3079,10 @@ async function refreshDeviceInfo() {
   try {
     const info = await window.studio.licenseGetDeviceInfo();
     if (info.ok) {
-      $('license-hw-id').textContent = info.shortHwId;
+      $('license-hw-id').textContent = info.hwId || info.shortHwId || '';
+      if (info.shortHwId && info.hwId) {
+        $('license-hw-id').title = `完整 64 位 HW_ID（短码 ${info.shortHwId} 仅用于展示）`;
+      }
       $('license-device-code').textContent = info.deviceCode;
     } else {
       $('license-hw-id').textContent = '获取失败';
@@ -3188,6 +3191,18 @@ function wireLicenseDialog() {
   $('license-dialog-close').addEventListener('click', () => dlg.close());
   dlg.addEventListener('click', (ev) => {
     if (ev.target === dlg) dlg.close();
+  });
+
+  $('btn-license-copy-hw-id').addEventListener('click', async () => {
+    const hwId = $('license-hw-id').textContent;
+    if (hwId && hwId !== '获取失败' && hwId !== '异常') {
+      try {
+        await navigator.clipboard.writeText(hwId);
+        setStatus('已复制完整 HW_ID', true);
+      } catch {
+        setStatus('复制失败', false);
+      }
+    }
   });
 
   $('btn-license-copy-device-code').addEventListener('click', async () => {

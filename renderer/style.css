@@ -1602,6 +1602,23 @@ body.studio-agent-source-locked #source {
   word-break: break-all;
 }
 
+.license-device-row--hw-id {
+  align-items: flex-start;
+}
+
+.license-device-value--hw-id {
+  flex: 1 1 100%;
+  min-width: 0;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  letter-spacing: 0.02em;
+}
+
+.license-hint--hw-id {
+  margin-top: 0.15rem;
+  margin-bottom: 0.35rem;
+}
+
 .license-device-code {
   font-size: 0.9rem;
   font-weight: 600;
